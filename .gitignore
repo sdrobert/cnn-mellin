@@ -102,3 +102,16 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+
+# sdrobert: project-specific settings
+.ftpconfig
+.ftpignore
+steps/
+utils/
+path.sh
+cmd.sh
+.python_version
+data/
+exp/
+conf/slurm.conf
