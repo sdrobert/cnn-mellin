@@ -22,14 +22,32 @@ A simple CNN for TIMIT to test the performance of the Mellin convolution
    ln -s ../../wsj/s5/utils .
    ln -s ../../wsj/s5/steps .
    ```
-5. Generate feature files. Here's an example for filter banks
+5. Install the local python package, preferably in a conda environment
+   ``` bash
+   # TODO: add conda requirements
+   python setup.py develop
+   ```
+6. Generate feature files and get them ready for pytorch. Here's an example for
+   SI filter banks
    ``` bash
    for x in train dev test; do
-     mkdir -p data/$x
+     mkdir -p data/$x/torch
      cp ../s5/data/$x/{glm,spk2gender,spk2utt,stm,text,utt2spk,wav.scp} data/$x
-     # you could just copy ../s5/data/$x/feats.scp if you wanted
      steps/make_fbank.sh data/$x exp/make_fbank/$x fbank
+     # utterance-level cmvn
+     compute-cmvn-stats \
+      scp:data/$x/feats.scp \
+      ark,scp:fbank/cmvn_$x.ark,data/$x/cmvn.scp
      utils/validate_data_dir.sh --no-feats data/$x
+     write-table-to-torch-dir \
+      "scp:apply-cmvn 'data/train/cmvn.scp' 'scp:data/$x/feats.scp' |" \
+      data/$x/torch/feats
    done
+   write-table-to-torch-dir \
+    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/tri3_ali/ali.*.gz |' ark:- |" \
+    data/train/torch/ali
+   write-table-to-torch-dir \
+    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/tri3_ali_dev/ali.*.gz |' ark:- |" \
+    data/dev/torch/ali
    ```
-6. 
+7. 
