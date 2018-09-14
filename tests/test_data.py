@@ -109,6 +109,34 @@ def test_spect_data_set_warnings(temp_dir):
         str(x.message) == "Missing feats for uttid: 'c'" for x in warnings)
 
 
+@pytest.mark.parametrize('cuda', [
+    pytest.param(
+        True,
+        marks=pytest.mark.skipif(
+            not torch.cuda.is_available(),
+            reason='no cuda available'
+            )
+        ),
+    False,
+])
+def test_spect_data_write_pdf(temp_dir, cuda):
+    torch.manual_seed(1)
+    feats_dir = os.path.join(temp_dir, 'feats')
+    os.makedirs(feats_dir)
+    torch.save(torch.rand(3, 3), os.path.join(feats_dir, 'a.pt'))
+    data_set = data.SpectDataSet(temp_dir)
+    z = torch.randint(10, (4, 5)).long()
+    if cuda:
+        data_set.write_pdf('b', z.cuda())
+    else:
+        data_set.write_pdf('b', z)
+    zp = torch.load(os.path.join(temp_dir, 'pdfs', 'b.pt'))
+    assert isinstance(zp, torch.FloatTensor)
+    assert torch.allclose(zp, z.float())
+    data_set.write_pdf(0, torch.rand(10, 4))
+    assert os.path.exists(os.path.join(temp_dir, 'pdfs', 'a.pt'))
+
+
 def test_spect_data_set_validity(temp_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')

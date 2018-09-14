@@ -112,7 +112,7 @@ class SpectDataSet(torch.utils.data.Dataset):
         super(SpectDataSet, self).__init__()
         self.data_dir = data_dir
         self.file_suffix = file_suffix
-        self.has_ali = os.path.isdir(os.path.join(data_dir))
+        self.has_ali = os.path.isdir(os.path.join(data_dir, 'ali'))
         if self.has_ali:
             self.has_ali = bool(sum(
                 1 for x in os.listdir(os.path.join(data_dir, 'ali'))
@@ -165,6 +165,31 @@ class SpectDataSet(torch.utils.data.Dataset):
         else:
             ali = None
         return feats, ali
+
+    def write_pdf(self, utt, pdf):
+        '''Write a pdf FloatTensor to the data directory
+
+        This method writes a pdf matrix to the directory ``data_dir/pdfs``
+        with the name ``<utt><file_suffix>``
+
+        Parameters
+        ----------
+        utt : str or int
+            The name of the utterance to write. If an integer is specified,
+            `utt` is assumed to index an utterance id specified in
+            ``self.utt_ids``
+        pdf : torch.Tensor
+            The tensor to write. It will be converted to a ``FloatTensor``
+            using the command ``pdf.cpu().float()``
+        '''
+        if isinstance(utt, int):
+            utt = self.utt_ids[utt]
+        pdfs_dir = os.path.join(self.data_dir, 'pdfs')
+        os.makedirs(pdfs_dir, exist_ok=True)
+        torch.save(
+            pdf.cpu().float(),
+            os.path.join(pdfs_dir, utt + self.file_suffix)
+        )
 
 
 def validate_spect_data_set(data_set):
