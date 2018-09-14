@@ -11,15 +11,6 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
 
 
-@pytest.fixture(scope='session')
-def temp_dir():
-    from tempfile import mkdtemp
-    from shutil import rmtree
-    dir_name = mkdtemp()
-    yield dir_name
-    rmtree(dir_name)
-
-
 def test_write_table_to_torch_dir(temp_dir):
     import torch
     out_dir = os.path.join(temp_dir, 'test_write_table_to_torch_dir')

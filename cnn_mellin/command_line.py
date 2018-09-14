@@ -61,7 +61,8 @@ def write_table_to_torch_dir(args=None):
 
     Writes to a folder in the format:
 
-       folder/
+    ::
+        folder/
           <key_1><file_suffix>
           <key_2><file_suffix>
           ...
