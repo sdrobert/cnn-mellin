@@ -7,6 +7,7 @@ from __future__ import print_function
 import os
 import warnings
 
+import numpy as np
 import torch
 import torch.utils.data
 
@@ -366,3 +367,56 @@ class SingleContextWindowDataSet(SpectDataSet):
 
     def __getitem__(self, idx):
         return self.get_context_window(idx)
+
+
+class EpochRandomSampler(torch.utils.data.Sampler):
+    '''Return random samples that are the same for a fixed epoch
+
+    Parameters
+    ----------
+    data_source : torch.data.utils.Dataset
+        The total number of samples
+    epoch : int, optional
+        The initial epoch
+    base_seed : int, optional
+        Determines the starting seed of the sampler. Sampling is seeded with
+        ``base_seed + epoch``. If unset, a seed is randomly generated from
+        the default generator
+
+    Attributes
+    ----------
+    epoch : int
+        The current epoch. Responsible for seeding the upcoming samples
+    data_source : torch.data.utils.Dataset
+    base_seed : int
+
+    Examples
+    --------
+    >>> sampler = EpochRandomSampler(
+    ...     torch.data.utils.TensorDataset(torch.arange(100)))
+    >>> samples_ep0 = tuple(sampler)  # random
+    >>> samples_ep1 = tuple(sampler)  # random, probably not same as first
+    >>> assert tuple(sampler.get_samples_for_epoch(0)) == samples_ep0
+    >>> assert tuple(sampler.get_samples_for_epoch(1)) == samples_ep1
+    '''
+
+    def __init__(self, data_source, epoch=0, base_seed=None):
+        super(EpochRandomSampler, self).__init__(data_source)
+        self.data_source = data_source
+        self.epoch = epoch
+        if base_seed is None:
+            base_seed = np.random.randint(np.iinfo(np.uint32).max)
+        self.base_seed = base_seed
+
+    def __len__(self):
+        return len(self.data_source)
+
+    def get_samples_for_epoch(self, epoch):
+        '''tuple : samples for a specific epoch'''
+        rs = np.random.RandomState(self.base_seed + epoch)
+        return rs.permutation(range(len(self.data_source)))
+
+    def __iter__(self):
+        ret = iter(self.get_samples_for_epoch(self.epoch))
+        self.epoch += 1
+        return ret

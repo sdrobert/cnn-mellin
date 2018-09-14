@@ -6,6 +6,7 @@ import os
 
 import pytest
 import torch
+import torch.utils.data
 
 import cnn_mellin.data as data
 
@@ -220,3 +221,18 @@ def test_single_context_window_data_set(temp_dir):
     torch.save(torch.arange(2, 6).long(), os.path.join(ali_dir, 'b.pt'))
     data_set = data.SingleContextWindowDataSet(1, 1, temp_dir)
     assert tuple(ali for (feats, ali) in data_set) == tuple(range(6))
+
+
+def test_epoch_random_sampler(temp_dir):
+    data_source = torch.utils.data.TensorDataset(torch.arange(100))
+    sampler = data.EpochRandomSampler(data_source, base_seed=1)
+    samples_ep0 = tuple(sampler)
+    samples_ep1 = tuple(sampler)
+    assert samples_ep0 != samples_ep1
+    assert sorted(samples_ep0) == list(range(100))
+    assert sorted(samples_ep1) == list(range(100))
+    assert samples_ep0 == tuple(sampler.get_samples_for_epoch(0))
+    assert samples_ep1 == tuple(sampler.get_samples_for_epoch(1))
+    sampler = data.EpochRandomSampler(data_source, epoch=10, base_seed=1)
+    assert samples_ep0 == tuple(sampler.get_samples_for_epoch(0))
+    assert samples_ep1 == tuple(sampler.get_samples_for_epoch(1))
