@@ -61,6 +61,8 @@ setup(
         'console_scripts': [
             'write-table-to-torch-dir = cnn_mellin.command_line:write_table_to'
             '_torch_dir',
+            'write-torch-dir-to-table = cnn_mellin.command_line:write_torch'
+            '_dir_to_table',
         ]
     }
 )

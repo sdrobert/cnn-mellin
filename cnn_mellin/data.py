@@ -129,14 +129,17 @@ class SpectDataSet(torch.utils.data.Dataset):
 
     def find_utt_ids(self, warn_on_missing):
         '''Iterator : all utterance ids from data_dir'''
+        neg_fsl = -len(self.file_suffix)
+        if not neg_fsl:
+            neg_fsl = None
         utt_ids = (
-            os.path.basename(x)[:-len(self.file_suffix)]
+            os.path.basename(x)[:neg_fsl]
             for x in os.listdir(os.path.join(self.data_dir, 'feats'))
             if x.endswith(self.file_suffix)
         )
         try:
             ali_utt_ids = set(
-                os.path.basename(x)[:-len(self.file_suffix)]
+                os.path.basename(x)[:neg_fsl]
                 for x in os.listdir(os.path.join(self.data_dir, 'ali'))
                 if x.endswith(self.file_suffix)
             )
