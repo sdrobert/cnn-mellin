@@ -420,3 +420,42 @@ class EpochRandomSampler(torch.utils.data.Sampler):
         ret = iter(self.get_samples_for_epoch(self.epoch))
         self.epoch += 1
         return ret
+
+
+def context_window_seq_to_batch(seq):
+    '''Convert a sequence of context window elements to a batch
+
+    Given a sequence of ``feats, ali`` pairs, where ``feats`` is either of size
+    ``(T, C, F)`` or ``(C, F)``, where ``T`` is some number of windows (which
+    can vary across elements in the sequence), ``C`` is the window size, and
+    ``F`` is some number filters, and ``ali`` is either of size ``(T,)`` or is
+    an integer, this method batches all the elements of the sequence into a
+    pair of ``batch_feats, batch_ali``, where ``batch_feats`` is of size
+    ``(N, C, F)``, ``N`` being the total number of windows, and ``batch_ali``
+    is of size ``(N,)``
+
+    Parameters
+    ----------
+    seq : sequence
+
+    Returns
+    -------
+    batch_feats, batch_ali : torch.FloatTensor, torch.LongTensor or None
+    '''
+    batch_feats = []
+    batch_ali = []
+    for feats, ali in seq:
+        if len(feats.size()) == 2:
+            feats = feats.unsqueeze(0)
+        batch_feats.append(feats)
+        if ali is None:
+            # assume every remaining ali will be none
+            batch_ali = None
+        else:
+            if isinstance(ali, int):
+                ali = torch.tensor([ali])
+            batch_ali.append(ali)
+    batch_feats = torch.cat(batch_feats)
+    if batch_ali is not None:
+        batch_ali = torch.cat(batch_ali)
+    return batch_feats, batch_ali

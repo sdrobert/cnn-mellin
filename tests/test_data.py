@@ -4,6 +4,8 @@ from __future__ import print_function
 
 import os
 
+from itertools import repeat
+
 import pytest
 import torch
 import torch.utils.data
@@ -236,3 +238,42 @@ def test_epoch_random_sampler(temp_dir):
     sampler = data.EpochRandomSampler(data_source, epoch=10, base_seed=1)
     assert samples_ep0 == tuple(sampler.get_samples_for_epoch(0))
     assert samples_ep1 == tuple(sampler.get_samples_for_epoch(1))
+
+
+@pytest.mark.parametrize('feat_sizes', [
+    ((3, 5, 4), (4, 5, 4), (1, 5, 4)),
+    ((2, 10),) * 10,
+])
+@pytest.mark.parametrize('include_ali', [True, False])
+def test_context_window_seq_to_batch(feat_sizes, include_ali):
+    torch.manual_seed(1)
+    includes_frames = len(feat_sizes[0]) == 3
+    feats = tuple(torch.rand(*x) for x in feat_sizes)
+    if includes_frames:
+        num_frames = sum(x[0] for x in feat_sizes)
+        alis = tuple(torch.randint(10, (x[0],)).long() for x in feat_sizes)
+    else:
+        num_frames = len(feat_sizes)
+        alis = tuple(
+            x.item() for x in torch.randint(10, (num_frames,)).long())
+    if not include_ali:
+        alis = repeat(None)
+    seq = zip(feats, alis)
+    batch_feats, batch_ali = data.context_window_seq_to_batch(seq)
+    assert tuple(batch_feats.size()) == (
+        num_frames, *feat_sizes[0][int(includes_frames):])
+    if include_ali:
+        assert tuple(batch_ali.size()) == (num_frames,)
+        # FIXME(sdrobert): casting to floats because of a bug in torch.allclose
+        # fix when fixed
+        batch_ali = batch_ali.float()
+    else:
+        assert not batch_ali
+    if includes_frames:
+        assert torch.allclose(torch.cat(feats), batch_feats)
+        if include_ali:
+            assert torch.allclose(torch.cat(alis).float(), batch_ali)
+    else:
+        assert torch.allclose(torch.stack(feats), batch_feats)
+        if include_ali:
+            assert torch.allclose(torch.tensor(alis).float(), batch_ali)
