@@ -177,16 +177,46 @@ def test_spect_data_set_validity(temp_dir):
     data.validate_spect_data_set(data_set)
 
 
-def test_context_window_data_set(temp_dir):
+def test_utterance_context_window_data_set(temp_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
     os.makedirs(feats_dir)
     a = torch.rand(2, 10)
     torch.save(a, os.path.join(feats_dir, 'a.pt'))
-    data_set = data.ContextWindowDataSet(1, 1, temp_dir)
+    data_set = data.UtteranceContextWindowDataSet(1, 1, temp_dir)
     windowed, _ = data_set[0]
     assert tuple(windowed.size()) == (2, 3, 10)
     assert torch.allclose(a[0], windowed[0, :2])
     assert torch.allclose(a[1], windowed[0, 2])
     assert torch.allclose(a[0], windowed[1, 0])
     assert torch.allclose(a[1], windowed[1, 1:])
+
+
+def test_single_context_window_data_set(temp_dir):
+    torch.manual_seed(1)
+    feats_dir = os.path.join(temp_dir, 'feats')
+    ali_dir = os.path.join(temp_dir, 'ali')
+    os.makedirs(feats_dir)
+    os.makedirs(ali_dir)
+    a = torch.rand(2, 5)
+    b = torch.rand(4, 5)
+    torch.save(a, os.path.join(feats_dir, 'a.pt'))
+    torch.save(b, os.path.join(feats_dir, 'b.pt'))
+    data_set = data.SingleContextWindowDataSet(1, 1, temp_dir)
+    assert len(data_set) == 6
+    assert all(feats.size() == (3, 5) for (feats, ali) in data_set)
+    assert torch.allclose(a[0], data_set[0][0][:2])
+    assert torch.allclose(a[1], data_set[0][0][2])
+    assert torch.allclose(a[0], data_set[1][0][0])
+    assert torch.allclose(a[1], data_set[1][0][1:])
+    assert torch.allclose(b[0], data_set[2][0][:2])
+    assert torch.allclose(b[1], data_set[2][0][2])
+    assert torch.allclose(b[:3], data_set[3][0])
+    assert torch.allclose(b[1:], data_set[4][0])
+    assert torch.allclose(b[2], data_set[5][0][0])
+    assert torch.allclose(b[3], data_set[5][0][1:])
+    assert torch.allclose(data_set[1][0], data_set[-5][0])
+    torch.save(torch.arange(2).long(), os.path.join(ali_dir, 'a.pt'))
+    torch.save(torch.arange(2, 6).long(), os.path.join(ali_dir, 'b.pt'))
+    data_set = data.SingleContextWindowDataSet(1, 1, temp_dir)
+    assert tuple(ali for (feats, ali) in data_set) == tuple(range(6))

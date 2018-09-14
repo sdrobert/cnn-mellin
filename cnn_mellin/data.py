@@ -258,16 +258,15 @@ def validate_spect_data_set(data_set):
                     ali.size()[0]))
 
 
-class ContextWindowDataSet(SpectDataSet):
-    '''Accesses spectrographic filter data, extracting fixed-width windows
+class UtteranceContextWindowDataSet(SpectDataSet):
+    '''SpectDataSet, extracting fixed-width windows over the utterance
 
-    Like a ``SpectDataSet``, ``ContextWindowDataSet`` indexes pairs of features
-    and alignments. Instead of returning features of shape ``(T, F)``,
+    Like a ``SpectDataSet``, ``UtteranceContextWindowDataSet`` indexes pairs of
+    features and alignments. Instead of returning features of shape ``(T, F)``,
     instances return features of shape ``(T, 1 + left + right, F)``, where the
     ``T`` axis indexes the so-called center frame and the ``1 + left + right``
     axis contains frame vectors (size ``F``) including the center frame,
-    ``left`` frames in time before the center frame, and ``right`` frames
-    after
+    ``left`` frames in time before the center frame, and ``right`` frames after
 
     Parameters
     ----------
@@ -287,11 +286,11 @@ class ContextWindowDataSet(SpectDataSet):
     '''
 
     def __init__(self, left, right, data_dir, **kwargs):
-        super(ContextWindowDataSet, self).__init__(data_dir, **kwargs)
+        super(UtteranceContextWindowDataSet, self).__init__(data_dir, **kwargs)
         self.left = left
         self.right = right
 
-    def get_context_windowed_utterance(self, idx):
+    def get_windowed_utterance(self, idx):
         '''Get pair of features (w/ context window) and alignments'''
         feats, ali = self.get_utterance_pair(idx)
         num_frames, num_filts = feats.size()
@@ -303,4 +302,67 @@ class ContextWindowDataSet(SpectDataSet):
         return windowed, ali
 
     def __getitem__(self, idx):
-        return self.get_context_windowed_utterance(idx)
+        return self.get_windowed_utterance(idx)
+
+
+class SingleContextWindowDataSet(SpectDataSet):
+    '''SpectDataSet, returning a single context window per index
+
+    Like ``SpectDataSet``, ``SingleContextWindowDataSet`` indexes pairs of
+    features and alignments. Instead of indexing features of shape ``(T, F)``
+    and alignments of shape ``T``, instances break down each utterance into
+    ``T`` separate context windows and ``T`` integers and indexes those. For
+    the ``t``-th context window of features, we have a tensor of size ``(1 +
+    left + right, F)``, where ``window[left]`` is the "center frame",
+    ``window[:left]`` are the frames before it, and ``window[left + 1:]`` are
+    those after. Context windows are ordered first by utterance, second by
+    center frame idx. For example, if there are only two utterances, "a" and
+    "b" of sizes ``(2, 5)`` and ``(4, 5)``, respectively, then the first index
+    (0) of the data set would be the context window of "a"'s first frame,
+    whereas the 4th index (3) of the data set points to the context window of
+    "b"'s second frame (1).
+
+    Parameters
+    ----------
+    left : int
+    right : int
+    data_dir : str
+    has_ali : bool
+    utt_ids : tuple
+    utt_lens : tuple
+        A tuple containing the number of frames of each utterance (i.e. ``T``)
+    '''
+
+    def __init__(self, left, right, data_dir, **kwargs):
+        super(SingleContextWindowDataSet, self).__init__(data_dir, **kwargs)
+        self.left = left
+        self.right = right
+        self.utt_lens = tuple(
+            torch.load(os.path.join(
+                self.data_dir, 'feats', x + self.file_suffix)).size()[0]
+            for x in self.utt_ids
+        )
+
+    def __len__(self):
+        return sum(self.utt_lens)
+
+    def get_context_window(self, idx):
+        idx_err_msg = 'list index out of range'
+        if idx < 0:
+            idx += len(self)
+            if idx < 0:
+                raise IndexError(idx_err_msg)
+        utt_idx = 0
+        for utt_len in self.utt_lens:
+            if idx < utt_len:
+                break
+            idx -= utt_len
+            utt_idx += 1
+        if utt_idx == len(self.utt_ids):
+            raise IndexError(idx_err_msg)
+        feats, ali = self.get_utterance_pair(utt_idx)
+        window = extract_window(feats, idx, self.left, self.right)
+        return window, ali[idx].item() if ali is not None else ali
+
+    def __getitem__(self, idx):
+        return self.get_context_window(idx)
