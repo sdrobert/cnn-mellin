@@ -175,3 +175,18 @@ def test_spect_data_set_validity(temp_dir):
         data.validate_spect_data_set(data_set)
     torch.save(torch.randint(10, (4,)).long(), ali_b_pt)
     data.validate_spect_data_set(data_set)
+
+
+def test_context_window_data_set(temp_dir):
+    torch.manual_seed(1)
+    feats_dir = os.path.join(temp_dir, 'feats')
+    os.makedirs(feats_dir)
+    a = torch.rand(2, 10)
+    torch.save(a, os.path.join(feats_dir, 'a.pt'))
+    data_set = data.ContextWindowDataSet(1, 1, temp_dir)
+    windowed, _ = data_set[0]
+    assert tuple(windowed.size()) == (2, 3, 10)
+    assert torch.allclose(a[0], windowed[0, :2])
+    assert torch.allclose(a[1], windowed[0, 2])
+    assert torch.allclose(a[0], windowed[1, 0])
+    assert torch.allclose(a[1], windowed[1, 1:])

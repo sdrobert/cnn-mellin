@@ -211,7 +211,8 @@ def validate_spect_data_set(data_set):
     Raises a ``ValueError`` if a condition is violated
     '''
     num_filts = None
-    for idx, (feats, ali) in enumerate(data_set):
+    for idx in range(len(data_set.utt_ids)):
+        feats, ali = data_set.get_utterance_pair(idx)
         if not isinstance(feats, torch.FloatTensor):
             raise ValueError(
                 "'{}' (index {}) in '{}' is not a FloatTensor".format(
@@ -255,3 +256,51 @@ def validate_spect_data_set(data_set):
                     feats.size()[0],
                     os.path.join(data_set.data_dir, 'ali'),
                     ali.size()[0]))
+
+
+class ContextWindowDataSet(SpectDataSet):
+    '''Accesses spectrographic filter data, extracting fixed-width windows
+
+    Like a ``SpectDataSet``, ``ContextWindowDataSet`` indexes pairs of features
+    and alignments. Instead of returning features of shape ``(T, F)``,
+    instances return features of shape ``(T, 1 + left + right, F)``, where the
+    ``T`` axis indexes the so-called center frame and the ``1 + left + right``
+    axis contains frame vectors (size ``F``) including the center frame,
+    ``left`` frames in time before the center frame, and ``right`` frames
+    after
+
+    Parameters
+    ----------
+    left : int
+    right : int
+    data_dir : str
+    file_suffix : str, optional
+    warn_on_missing : bool, optional
+
+    Attributes
+    ----------
+    left : int
+    right : int
+    data_dir : str
+    has_ali : bool
+    utt_ids : tuple
+    '''
+
+    def __init__(self, left, right, data_dir, **kwargs):
+        super(ContextWindowDataSet, self).__init__(data_dir, **kwargs)
+        self.left = left
+        self.right = right
+
+    def get_context_windowed_utterance(self, idx):
+        '''Get pair of features (w/ context window) and alignments'''
+        feats, ali = self.get_utterance_pair(idx)
+        num_frames, num_filts = feats.size()
+        windowed = torch.empty(
+            num_frames, 1 + self.left + self.right, num_filts)
+        for center_frame in range(num_frames):
+            windowed[center_frame] = extract_window(
+                feats, center_frame, self.left, self.right)
+        return windowed, ali
+
+    def __getitem__(self, idx):
+        return self.get_context_windowed_utterance(idx)
