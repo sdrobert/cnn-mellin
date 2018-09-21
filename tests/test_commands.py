@@ -16,6 +16,7 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
 
 
+@pytest.mark.cpu
 def test_write_table_to_torch_dir(temp_dir):
     out_dir = os.path.join(temp_dir, 'test_write_table_to_torch_dir')
     os.makedirs(out_dir)
@@ -33,6 +34,7 @@ def test_write_table_to_torch_dir(temp_dir):
     assert torch.allclose(a, torch.load(os.path.join(out_dir, 'a.pt')))
 
 
+@pytest.mark.cpu
 def test_write_torch_dir_to_table(temp_dir):
     import torch
     in_dir = os.path.join(temp_dir, 'test_write_torch_dir_to_table')

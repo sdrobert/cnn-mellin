@@ -18,3 +18,11 @@ def temp_dir():
     dir_name = mkdtemp()
     yield dir_name
     rmtree(dir_name)
+
+
+@pytest.fixture(params=[
+    pytest.param('cpu', marks=pytest.mark.cpu),
+    pytest.param('cuda', marks=pytest.mark.gpu),
+], scope='session')
+def device(request):
+    return request.param

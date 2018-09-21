@@ -64,13 +64,13 @@ class SpectDataSet(torch.utils.data.Dataset):
     ::
         data_dir/
             feats/
-                <uttid1><file_suffix>
-                <uttid2><file_suffix>
+                <file_prefix><uttid1><file_suffix>
+                <file_prefix><uttid2><file_suffix>
                 ...
             [
             ali/
-                <uttid1><file_suffix>
-                <uttid2><file_suffix>
+                <file_prefix><uttid1><file_suffix>
+                <file_prefix><uttid2><file_suffix>
                 ...
             ]
 
@@ -88,6 +88,8 @@ class SpectDataSet(torch.utils.data.Dataset):
     ----------
     data_dir : str
         A path to feature directory
+    file_prefix : str, optional
+        The prefix that indicates that the file counts toward the data set
     file_suffix : str, optional
         The suffix that indicates that the file counts toward the data set
     warn_on_missing : bool, optional
@@ -109,15 +111,18 @@ class SpectDataSet(torch.utils.data.Dataset):
         contains only the utterances in the intersection of each directory.
     '''
 
-    def __init__(self, data_dir, file_suffix='.pt', warn_on_missing=True):
+    def __init__(
+            self, data_dir, file_prefix='', file_suffix='.pt',
+            warn_on_missing=True):
         super(SpectDataSet, self).__init__()
         self.data_dir = data_dir
+        self.file_prefix = file_prefix
         self.file_suffix = file_suffix
         self.has_ali = os.path.isdir(os.path.join(data_dir, 'ali'))
         if self.has_ali:
             self.has_ali = bool(sum(
                 1 for x in os.listdir(os.path.join(data_dir, 'ali'))
-                if x.endswith(file_suffix)
+                if x.startswith(file_prefix) and x.endswith(file_suffix)
             ))
         self.utt_ids = tuple(sorted(
             self.find_utt_ids(warn_on_missing)))
@@ -133,16 +138,18 @@ class SpectDataSet(torch.utils.data.Dataset):
         neg_fsl = -len(self.file_suffix)
         if not neg_fsl:
             neg_fsl = None
+        fpl = len(self.file_prefix)
         utt_ids = (
-            os.path.basename(x)[:neg_fsl]
+            os.path.basename(x)[fpl:neg_fsl]
             for x in os.listdir(os.path.join(self.data_dir, 'feats'))
-            if x.endswith(self.file_suffix)
+            if x.startswith(self.file_prefix) and x.endswith(self.file_suffix)
         )
         try:
             ali_utt_ids = set(
-                os.path.basename(x)[:neg_fsl]
+                os.path.basename(x)[fpl:neg_fsl]
                 for x in os.listdir(os.path.join(self.data_dir, 'ali'))
-                if x.endswith(self.file_suffix)
+                if x.startswith(self.file_prefix) and
+                x.endswith(self.file_suffix)
             )
         except FileNotFoundError:
             assert not self.has_ali
@@ -162,10 +169,16 @@ class SpectDataSet(torch.utils.data.Dataset):
         '''Get a pair of features, alignments'''
         utt_id = self.utt_ids[idx]
         feats = torch.load(
-            os.path.join(self.data_dir, 'feats', utt_id + self.file_suffix))
+            os.path.join(
+                self.data_dir,
+                'feats',
+                self.file_prefix + utt_id + self.file_suffix))
         if self.has_ali:
             ali = torch.load(
-                os.path.join(self.data_dir, 'ali', utt_id + self.file_suffix))
+                os.path.join(
+                    self.data_dir,
+                    'ali',
+                    self.file_prefix + utt_id + self.file_suffix))
         else:
             ali = None
         return feats, ali
@@ -174,7 +187,7 @@ class SpectDataSet(torch.utils.data.Dataset):
         '''Write a pdf FloatTensor to the data directory
 
         This method writes a pdf matrix to the directory ``data_dir/pdfs``
-        with the name ``<utt><file_suffix>``
+        with the name ``<file_prefix><utt><file_suffix>``
 
         Parameters
         ----------
@@ -192,7 +205,7 @@ class SpectDataSet(torch.utils.data.Dataset):
         os.makedirs(pdfs_dir, exist_ok=True)
         torch.save(
             pdf.cpu().float(),
-            os.path.join(pdfs_dir, utt + self.file_suffix)
+            os.path.join(pdfs_dir, self.file_prefix + utt + self.file_suffix)
         )
 
 
@@ -274,6 +287,7 @@ class UtteranceContextWindowDataSet(SpectDataSet):
     data_dir : str
     left : int
     right : int
+    file_prefix : str, optional
     file_suffix : str, optional
     warn_on_missing : bool, optional
 
@@ -323,7 +337,7 @@ class SingleContextWindowDataSet(SpectDataSet):
     whereas the 4th index (3) of the data set points to the context window of
     "b"'s second frame (1).
 
-    Parameters
+    Attributes
     ----------
     data_dir : str
     left : int
@@ -471,17 +485,26 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
         ::
             data_dir/
                 feats/
-                    <utt1>.pt
-                    <utt2>.pt
+                    <file_prefix><utt1><file_suffix>
+                    <file_prefix><utt2><file_suffix>
                     ...
                 ali/
-                    <utt1>.pt
-                    <utt2>.pt
+                    <file_prefix><utt1><file_suffix>
+                    <file_prefix><utt2><file_suffix>
                     ...
     params : cnn_model.params.SpectDataSetParams
         Parameters for things like context window size, batch size, and
         seed. For this loader, the batch size equals the number of context
         windows
+    file_prefix : str, optional
+        The prefix that indicates that the file counts toward the data set
+    file_suffix : str, optional
+        The suffix that indicates that the file counts toward the data set
+    warn_on_missing : bool, optional
+        If some files with ``file_suffix`` exist in the ``ali/`` dir,
+        there's a mismatch between the utterances in ``feats/`` and ``ali/``,
+        and `warn_on_missing` is ``True``, a warning will be issued
+        (via ``warnings``) regarding each such mismatch
     init_epoch : int, optional
         Where training should resume from
     kwargs : keyword arguments, optional
@@ -501,7 +524,9 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
         `ali` is a ``LongTensor`` of size ``(params.batch_size,)``
     '''
 
-    def __init__(self, data_dir, params, init_epoch=0, **kwargs):
+    def __init__(
+            self, data_dir, params, init_epoch=0, file_prefix='',
+            file_suffix='.pt', warn_on_missing=True, **kwargs):
         for bad_kwarg in (
                 'batch_size', 'sampler', 'batch_sampler', 'shuffle',
                 'collate_fn'):
@@ -511,18 +536,21 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
                         bad_kwarg, type(self)))
         self.data_dir = data_dir
         self.params = params
-        data_source = SingleContextWindowDataSet(
-            data_dir, params.context_left, params.context_right)
-        if not data_source.has_ali:
+        self.data_source = SingleContextWindowDataSet(
+            data_dir, params.context_left, params.context_right,
+            file_prefix=file_prefix, file_suffix=file_suffix,
+            warn_on_missing=warn_on_missing,
+        )
+        if not self.data_source.has_ali:
             raise ValueError(
                 "'{}' must have alignment info for training".format(
                     data_dir))
         sampler = EpochRandomSampler(
-            data_source, init_epoch=init_epoch, base_seed=params.seed)
+            self.data_source, init_epoch=init_epoch, base_seed=params.seed)
         batch_sampler = torch.utils.data.BatchSampler(
             sampler, params.batch_size, drop_last=params.drop_last)
         super(TrainingDataLoader, self).__init__(
-            data_source,
+            self.data_source,
             batch_sampler=batch_sampler,
             collate_fn=context_window_seq_to_batch,
             **kwargs
@@ -539,17 +567,26 @@ class EvaluationDataLoader(torch.utils.data.DataLoader):
         ::
             data_dir/
                 feats/
-                    <utt1>.pt
-                    <utt2>.pt
+                    <file_prefix><utt1><file_suffix>
+                    <file_prefix><utt2><file_suffix>
                     ...
                 [ali/
-                    <utt1>.pt
-                    <utt2>.pt
+                    <file_prefix><utt1><file_suffix>
+                    <file_prefix><utt2><file_suffix>
                     ...]
         Where the alignment directory is optional
     params : cnn_model.params.SpectDataSetParams
         Parameters for things like context window size, batch size, and
         seed. For this loader, the batch size equals the number of utterances
+    file_prefix : str, optional
+        The prefix that indicates that the file counts toward the data set
+    file_suffix : str, optional
+        The suffix that indicates that the file counts toward the data set
+    warn_on_missing : bool, optional
+        If some files with ``file_suffix`` exist in the ``ali/`` dir,
+        there's a mismatch between the utterances in ``feats/`` and ``ali/``,
+        and `warn_on_missing` is ``True``, a warning will be issued
+        (via ``warnings``) regarding each such mismatch
     kwargs : keyword arguments, optional
         Additional ``DataLoader`` arguments
 
@@ -589,7 +626,9 @@ class EvaluationDataLoader(torch.utils.data.DataLoader):
         feats, alis = context_window_seq_to_batch(zip(feats, alis))
         return feats, alis, tuple(feat_sizes), tuple(utt_ids)
 
-    def __init__(self, data_dir, params, **kwargs):
+    def __init__(
+            self, data_dir, params, file_prefix='', file_suffix='.pt',
+            warn_on_missing=True, **kwargs):
         for bad_kwarg in (
                 'batch_size', 'sampler', 'batch_sampler', 'shuffle',
                 'collate_fn'):
@@ -599,10 +638,13 @@ class EvaluationDataLoader(torch.utils.data.DataLoader):
                         bad_kwarg, type(self)))
         self.data_dir = data_dir
         self.params = params
-        data_source = self.EvaluationDataSet(
-            data_dir, params.context_left, params.context_right)
+        self.data_source = self.EvaluationDataSet(
+            data_dir, params.context_left, params.context_right,
+            file_prefix=file_prefix, file_suffix=file_suffix,
+            warn_on_missing=warn_on_missing,
+        )
         super(EvaluationDataLoader, self).__init__(
-            data_source,
+            self.data_source,
             batch_size=params.batch_size,
             shuffle=False,
             collate_fn=self.eval_collate_fn,

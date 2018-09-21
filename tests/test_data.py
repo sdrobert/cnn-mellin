@@ -19,6 +19,7 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
 
 
+@pytest.mark.cpu
 @pytest.mark.parametrize("left", [0, 1, 100])
 @pytest.mark.parametrize("right", [0, 1, 100])
 @pytest.mark.parametrize("T", [1, 5, 10])
@@ -45,8 +46,10 @@ def test_extract_window(left, right, T):
         )
 
 
+@pytest.mark.cpu
 @pytest.mark.parametrize('num_utts', [1, 2, 10])
-def test_valid_spect_data_set(temp_dir, num_utts):
+@pytest.mark.parametrize('file_prefix', ['prefix_', ''])
+def test_valid_spect_data_set(temp_dir, num_utts, file_prefix):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
     ali_dir = os.path.join(temp_dir, 'ali')
@@ -67,8 +70,12 @@ def test_valid_spect_data_set(temp_dir, num_utts):
     with open(os.path.join(feats_dir, 'ignore_me'), 'w') as f:
         pass
     for utt_id, feat in zip(utt_ids, feats):
-        torch.save(feat, os.path.join(feats_dir, utt_id + '.pt'))
-    data_set = data.SpectDataSet(temp_dir)
+        torch.save(feat, os.path.join(feats_dir, file_prefix + utt_id + '.pt'))
+    # note that this'll just resave the same features if there's no file
+    # prefix. If there is, these ought to be ignored by the data set
+    for utt_id, feat in zip(utt_ids, feats):
+        torch.save(feat, os.path.join(feats_dir,  utt_id + '.pt'))
+    data_set = data.SpectDataSet(temp_dir, file_prefix=file_prefix)
     assert not data_set.has_ali
     assert len(utt_ids) == len(data_set.utt_ids)
     assert all(
@@ -78,8 +85,8 @@ def test_valid_spect_data_set(temp_dir, num_utts):
         for (feat_a, (feat_b, ali_b)) in zip(feats, data_set)
     )
     for utt_id, ali in zip(utt_ids, alis):
-        torch.save(ali, os.path.join(ali_dir, utt_id + '.pt'))
-    data_set = data.SpectDataSet(temp_dir)
+        torch.save(ali, os.path.join(ali_dir, file_prefix + utt_id + '.pt'))
+    data_set = data.SpectDataSet(temp_dir, file_prefix=file_prefix)
     assert data_set.has_ali
     assert len(utt_ids) == len(data_set.utt_ids)
     assert all(
@@ -91,6 +98,7 @@ def test_valid_spect_data_set(temp_dir, num_utts):
     )
 
 
+@pytest.mark.cpu
 def test_spect_data_set_warnings(temp_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
@@ -113,24 +121,14 @@ def test_spect_data_set_warnings(temp_dir):
         str(x.message) == "Missing feats for uttid: 'c'" for x in warnings)
 
 
-@pytest.mark.parametrize('cuda', [
-    pytest.param(
-        True,
-        marks=pytest.mark.skipif(
-            not torch.cuda.is_available(),
-            reason='no cuda available'
-            )
-        ),
-    False,
-])
-def test_spect_data_write_pdf(temp_dir, cuda):
+def test_spect_data_write_pdf(temp_dir, device):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
     os.makedirs(feats_dir)
     torch.save(torch.rand(3, 3), os.path.join(feats_dir, 'a.pt'))
     data_set = data.SpectDataSet(temp_dir)
     z = torch.randint(10, (4, 5)).long()
-    if cuda:
+    if device == 'cuda':
         data_set.write_pdf('b', z.cuda())
     else:
         data_set.write_pdf('b', z)
@@ -141,6 +139,7 @@ def test_spect_data_write_pdf(temp_dir, cuda):
     assert os.path.exists(os.path.join(temp_dir, 'pdfs', 'a.pt'))
 
 
+@pytest.mark.cpu
 def test_spect_data_set_validity(temp_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
@@ -181,6 +180,7 @@ def test_spect_data_set_validity(temp_dir):
     data.validate_spect_data_set(data_set)
 
 
+@pytest.mark.cpu
 def test_utterance_context_window_data_set(temp_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
@@ -196,6 +196,7 @@ def test_utterance_context_window_data_set(temp_dir):
     assert torch.allclose(a[1], windowed[1, 1:])
 
 
+@pytest.mark.cpu
 def test_single_context_window_data_set(temp_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
@@ -226,6 +227,7 @@ def test_single_context_window_data_set(temp_dir):
     assert tuple(ali for (feats, ali) in data_set) == tuple(range(6))
 
 
+@pytest.mark.cpu
 def test_epoch_random_sampler(temp_dir):
     data_source = torch.utils.data.TensorDataset(torch.arange(100))
     sampler = data.EpochRandomSampler(data_source, base_seed=1)
@@ -241,6 +243,7 @@ def test_epoch_random_sampler(temp_dir):
     assert samples_ep1 == tuple(sampler.get_samples_for_epoch(1))
 
 
+@pytest.mark.cpu
 @pytest.mark.parametrize('feat_sizes', [
     ((3, 5, 4), (4, 5, 4), (1, 5, 4)),
     ((2, 10),) * 10,
@@ -280,7 +283,7 @@ def test_context_window_seq_to_batch(feat_sizes, include_ali):
             assert torch.allclose(torch.tensor(alis).float(), batch_ali)
 
 
-def test_training_data_loader(temp_dir):
+def test_training_data_loader(temp_dir, device):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
     ali_dir = os.path.join(temp_dir, 'ali')
@@ -301,7 +304,8 @@ def test_training_data_loader(temp_dir):
         torch.save(
             torch.randint(10, (num_frames,)).long(),
             os.path.join(ali_dir, utt_fname))
-    data_loader = data.TrainingDataLoader(temp_dir, p)
+    data_loader = data.TrainingDataLoader(
+        temp_dir, p, pin_memory=device == 'cuda')
     total_windows_ep0 = 0
     for feat, ali in data_loader:
         assert tuple(feat.size()) == (5, 3, 2)
@@ -321,6 +325,7 @@ def test_training_data_loader(temp_dir):
         temp_dir, p,
         init_epoch=1,
         num_workers=4,
+        pin_memory=device == 'cuda'
     )
     feats_ep1_b, alis_ep1_b = [], []
     for feat, ali in data_loader:
@@ -338,7 +343,7 @@ def test_training_data_loader(temp_dir):
     )
 
 
-def test_evaluation_data_loader(temp_dir):
+def test_evaluation_data_loader(temp_dir, device):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
     ali_dir = os.path.join(temp_dir, 'ali')
@@ -374,8 +379,10 @@ def test_evaluation_data_loader(temp_dir):
             assert torch.allclose(
                 b_alis.float(), torch.cat(alis[cur_idx:cur_idx + 5]).float())
             cur_idx += 5
-    data_loader = data.EvaluationDataLoader(temp_dir, p)
+    data_loader = data.EvaluationDataLoader(
+        temp_dir, p, pin_memory=device == 'cuda')
     _compare_data_loader(data_loader)
     _compare_data_loader(data_loader)
-    data_loader = data.EvaluationDataLoader(temp_dir, p, num_workers=4)
+    data_loader = data.EvaluationDataLoader(
+        temp_dir, p, num_workers=4, pin_memory=device == 'cuda')
     _compare_data_loader(data_loader)
