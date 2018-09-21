@@ -49,32 +49,13 @@ def test_extract_window(left, right, T):
 @pytest.mark.cpu
 @pytest.mark.parametrize('num_utts', [1, 2, 10])
 @pytest.mark.parametrize('file_prefix', ['prefix_', ''])
-def test_valid_spect_data_set(temp_dir, num_utts, file_prefix):
-    torch.manual_seed(1)
-    feats_dir = os.path.join(temp_dir, 'feats')
-    ali_dir = os.path.join(temp_dir, 'ali')
-    os.makedirs(feats_dir)
-    os.makedirs(ali_dir)
-    utt_ids = [
-        '{:010d}'.format(x)
-        for x in range(num_utts)
-    ]
-    feats = [
-        torch.rand(x + 1, num_utts + 1)
-        for x in range(num_utts)
-    ]
-    alis = [
-        torch.randint(x + 1, (num_utts + 1,))
-        for x in range(num_utts)
-    ]
-    with open(os.path.join(feats_dir, 'ignore_me'), 'w') as f:
-        pass
-    for utt_id, feat in zip(utt_ids, feats):
-        torch.save(feat, os.path.join(feats_dir, file_prefix + utt_id + '.pt'))
+def test_valid_spect_data_set(
+        temp_dir, num_utts, file_prefix, populate_torch_dir):
+    feats, alis, _, utt_ids = populate_torch_dir(
+        temp_dir, num_utts, file_prefix=file_prefix, include_ali=False)
     # note that this'll just resave the same features if there's no file
     # prefix. If there is, these ought to be ignored by the data set
-    for utt_id, feat in zip(utt_ids, feats):
-        torch.save(feat, os.path.join(feats_dir,  utt_id + '.pt'))
+    populate_torch_dir(temp_dir, num_utts, include_ali=False)
     data_set = data.SpectDataSet(temp_dir, file_prefix=file_prefix)
     assert not data_set.has_ali
     assert len(utt_ids) == len(data_set.utt_ids)
@@ -84,15 +65,16 @@ def test_valid_spect_data_set(temp_dir, num_utts, file_prefix):
         ali_b is None and torch.allclose(feat_a, feat_b)
         for (feat_a, (feat_b, ali_b)) in zip(feats, data_set)
     )
-    for utt_id, ali in zip(utt_ids, alis):
-        torch.save(ali, os.path.join(ali_dir, file_prefix + utt_id + '.pt'))
+    feats, alis, _, utt_ids = populate_torch_dir(
+        temp_dir, num_utts, file_prefix=file_prefix, include_ali=True)
     data_set = data.SpectDataSet(temp_dir, file_prefix=file_prefix)
     assert data_set.has_ali
     assert len(utt_ids) == len(data_set.utt_ids)
     assert all(
         utt_a == utt_b for (utt_a, utt_b) in zip(utt_ids, data_set.utt_ids))
     assert all(
-        torch.allclose(ali_a, ali_b) and torch.allclose(feat_a, feat_b)
+        torch.allclose(ali_a.float(), ali_b.float()) and
+        torch.allclose(feat_a, feat_b)
         for ((feat_a, ali_a), (feat_b, ali_b))
         in zip(zip(feats, alis), data_set)
     )
@@ -283,12 +265,8 @@ def test_context_window_seq_to_batch(feat_sizes, include_ali):
             assert torch.allclose(torch.tensor(alis).float(), batch_ali)
 
 
-def test_training_data_loader(temp_dir, device):
-    torch.manual_seed(1)
-    feats_dir = os.path.join(temp_dir, 'feats')
-    ali_dir = os.path.join(temp_dir, 'ali')
-    os.makedirs(feats_dir)
-    os.makedirs(ali_dir)
+def test_training_data_loader(temp_dir, device, populate_torch_dir):
+    populate_torch_dir(temp_dir, 5, num_filts=2)
     p = params.SpectDataSetParams(
         context_left=1,
         context_right=1,
@@ -296,14 +274,6 @@ def test_training_data_loader(temp_dir, device):
         seed=2,
         drop_last=True,
     )
-    for utt_idx in range(5):
-        utt_fname = '{:02d}.pt'.format(utt_idx)
-        num_frames = torch.randint(1, 5, (1,)).long().item()
-        torch.save(
-            torch.rand(num_frames, 2), os.path.join(feats_dir, utt_fname))
-        torch.save(
-            torch.randint(10, (num_frames,)).long(),
-            os.path.join(ali_dir, utt_fname))
     data_loader = data.TrainingDataLoader(
         temp_dir, p, pin_memory=device == 'cuda')
     total_windows_ep0 = 0
@@ -343,7 +313,7 @@ def test_training_data_loader(temp_dir, device):
     )
 
 
-def test_evaluation_data_loader(temp_dir, device):
+def test_evaluation_data_loader(temp_dir, device, populate_torch_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
     ali_dir = os.path.join(temp_dir, 'ali')
@@ -354,18 +324,7 @@ def test_evaluation_data_loader(temp_dir, device):
         context_right=1,
         batch_size=5,
     )
-    feats, alis, feat_sizes, utt_ids = [], [], [], []
-    for utt_idx in range(20):
-        utt_id = '{:03d}'.format(utt_idx)
-        feat_size = torch.randint(1, 10, (1,)).long().item()
-        feat = torch.rand(feat_size, 5)
-        ali = torch.randint(10, (feat_size,)).long()
-        torch.save(feat, os.path.join(feats_dir, utt_id + '.pt'))
-        torch.save(ali, os.path.join(ali_dir, utt_id + '.pt'))
-        feats.append(feat)
-        alis.append(ali)
-        feat_sizes.append(feat_size)
-        utt_ids.append(utt_id)
+    feats, alis, feat_sizes, utt_ids = populate_torch_dir(temp_dir, 20)
 
     def _compare_data_loader(data_loader):
         assert len(data_loader) == 4
