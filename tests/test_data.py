@@ -311,6 +311,21 @@ def test_training_data_loader(temp_dir, device, populate_torch_dir):
         torch.allclose(ali_a.float(), ali_b.float())
         for (ali_a, ali_b) in zip(alis_ep1_a, alis_ep1_b)
     )
+    data_loader.epoch = 1
+    feats_ep1_c, alis_ep1_c = [], []
+    for feat, ali in data_loader:
+        assert tuple(feat.size()) == (5, 3, 2)
+        assert tuple(ali.size()) == (5,)
+        feats_ep1_c.append(feat)
+        alis_ep1_c.append(ali)
+    assert all(
+        torch.allclose(feat_a, feat_c)
+        for (feat_a, feat_c) in zip(feats_ep1_a, feats_ep1_c)
+    )
+    assert all(
+        torch.allclose(ali_a.float(), ali_c.float())
+        for (ali_a, ali_c) in zip(alis_ep1_a, alis_ep1_c)
+    )
 
 
 def test_evaluation_data_loader(temp_dir, device, populate_torch_dir):

@@ -545,16 +545,25 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
             raise ValueError(
                 "'{}' must have alignment info for training".format(
                     data_dir))
-        sampler = EpochRandomSampler(
+        self.__sampler = EpochRandomSampler(
             self.data_source, init_epoch=init_epoch, base_seed=params.seed)
         batch_sampler = torch.utils.data.BatchSampler(
-            sampler, params.batch_size, drop_last=params.drop_last)
+            self.__sampler, params.batch_size, drop_last=params.drop_last)
         super(TrainingDataLoader, self).__init__(
             self.data_source,
             batch_sampler=batch_sampler,
             collate_fn=context_window_seq_to_batch,
             **kwargs
         )
+
+    @property
+    def epoch(self):
+        '''int : the current epoch'''
+        return self.__sampler.epoch
+
+    @epoch.setter
+    def epoch(self, val):
+        self.__sampler.epoch = val
 
 
 class EvaluationDataLoader(torch.utils.data.DataLoader):
