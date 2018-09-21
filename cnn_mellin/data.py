@@ -480,7 +480,8 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
                     ...
     params : cnn_model.params.SpectDataSetParams
         Parameters for things like context window size, batch size, and
-        seed
+        seed. For this loader, the batch size equals the number of context
+        windows
     init_epoch : int, optional
         Where training should resume from
     kwargs : keyword arguments, optional
@@ -490,6 +491,14 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
     ----------
     data_dir : str
     params : cnn_model.params.SpectDataParams
+
+    Yields
+    ------
+    feats, alis : tensor, tensor, tuple, tuple
+        `feats` is a ``FloatTensor`` of size ``(params.batch_size, C, F)``,
+        where ``param.batch_size`` is the number of context windows, ``C`` is
+        the context window size, and ``F`` is the number of filters per frame.
+        `ali` is a ``LongTensor`` of size ``(params.batch_size,)``
     '''
 
     def __init__(self, data_dir, params, init_epoch=0, **kwargs):
@@ -516,5 +525,86 @@ class TrainingDataLoader(torch.utils.data.DataLoader):
             data_source,
             batch_sampler=batch_sampler,
             collate_fn=context_window_seq_to_batch,
+            **kwargs
+        )
+
+
+class EvaluationDataLoader(torch.utils.data.DataLoader):
+    '''Serves batches of context windows over sequential utterances
+
+    Parameters
+    ----------
+    data_dir : str
+        Path to the torch data directory. Should have the format
+        ::
+            data_dir/
+                feats/
+                    <utt1>.pt
+                    <utt2>.pt
+                    ...
+                [ali/
+                    <utt1>.pt
+                    <utt2>.pt
+                    ...]
+        Where the alignment directory is optional
+    params : cnn_model.params.SpectDataSetParams
+        Parameters for things like context window size, batch size, and
+        seed. For this loader, the batch size equals the number of utterances
+    kwargs : keyword arguments, optional
+        Additional ``DataLoader`` arguments
+
+    Attributes
+    ----------
+    data_dir : str
+    params : cnn_model.params.SpectDataParams
+
+    Yields
+    ------
+    feats, alis, feat_sizes, utt_ids : tensor, tensor, tuple, tuple
+        `feats` is a ``FloatTensor`` of size ``(N, C, F)``, where ``N`` is
+        the number of context windows, ``C`` is the context window size, and
+        ``F`` is the number of filters per frame. `ali` is a ``LongTensor``
+        of size ``(N,)`` (or ``None`` if the ``ali`` dir was not specified).
+        `feat_sizes` is a tuple of size ``params.batch_size``
+        specifying the number of context windows per utterance in the batch.
+        ``feats[sum(feat_sizes[:i]):sum(feat_sizes[:i+1])]`` are the context
+        windows for the ``i``-th utterance in the batch
+        (``sum(feat_sizes) == N``). ``utt_ids`` is a tuple of size
+        ``params.batch_size`` naming the utterances in the batch
+    '''
+    class EvaluationDataSet(UtteranceContextWindowDataSet):
+        '''Append feat_size and utt_id to each sample's tuple'''
+
+        def __getitem__(self, idx):
+            feats, alis = super(
+                EvaluationDataLoader.EvaluationDataSet, self).__getitem__(idx)
+            feat_size = feats.size()[0]
+            utt_id = self.utt_ids[idx]
+            return feats, alis, feat_size, utt_id
+
+    @staticmethod
+    def eval_collate_fn(seq):
+        '''Update context_window_seq_to_batch to handle feat_sizes, utt_ids'''
+        feats, alis, feat_sizes, utt_ids = zip(*seq)
+        feats, alis = context_window_seq_to_batch(zip(feats, alis))
+        return feats, alis, tuple(feat_sizes), tuple(utt_ids)
+
+    def __init__(self, data_dir, params, **kwargs):
+        for bad_kwarg in (
+                'batch_size', 'sampler', 'batch_sampler', 'shuffle',
+                'collate_fn'):
+            if bad_kwarg in kwargs:
+                raise TypeError(
+                    'keyword argument "{}" invalid for {} types'.format(
+                        bad_kwarg, type(self)))
+        self.data_dir = data_dir
+        self.params = params
+        data_source = self.EvaluationDataSet(
+            data_dir, params.context_left, params.context_right)
+        super(EvaluationDataLoader, self).__init__(
+            data_source,
+            batch_size=params.batch_size,
+            shuffle=False,
+            collate_fn=self.eval_collate_fn,
             **kwargs
         )

@@ -336,3 +336,46 @@ def test_training_data_loader(temp_dir):
         torch.allclose(ali_a.float(), ali_b.float())
         for (ali_a, ali_b) in zip(alis_ep1_a, alis_ep1_b)
     )
+
+
+def test_evaluation_data_loader(temp_dir):
+    torch.manual_seed(1)
+    feats_dir = os.path.join(temp_dir, 'feats')
+    ali_dir = os.path.join(temp_dir, 'ali')
+    os.makedirs(feats_dir)
+    os.makedirs(ali_dir)
+    p = params.SpectDataSetParams(
+        context_left=1,
+        context_right=1,
+        batch_size=5,
+    )
+    feats, alis, feat_sizes, utt_ids = [], [], [], []
+    for utt_idx in range(20):
+        utt_id = '{:03d}'.format(utt_idx)
+        feat_size = torch.randint(1, 10, (1,)).long().item()
+        feat = torch.rand(feat_size, 5)
+        ali = torch.randint(10, (feat_size,)).long()
+        torch.save(feat, os.path.join(feats_dir, utt_id + '.pt'))
+        torch.save(ali, os.path.join(ali_dir, utt_id + '.pt'))
+        feats.append(feat)
+        alis.append(ali)
+        feat_sizes.append(feat_size)
+        utt_ids.append(utt_id)
+
+    def _compare_data_loader(data_loader):
+        assert len(data_loader) == 4
+        cur_idx = 0
+        for b_feats, b_alis, b_feat_sizes, b_utt_ids in data_loader:
+            assert tuple(b_feats.size()[1:]) == (3, 5)
+            assert b_feats.size()[0] == sum(b_feat_sizes)
+            assert b_utt_ids == tuple(utt_ids[cur_idx:cur_idx + 5])
+            assert torch.allclose(
+                b_feats[:, 1], torch.cat(feats[cur_idx:cur_idx + 5]))
+            assert torch.allclose(
+                b_alis.float(), torch.cat(alis[cur_idx:cur_idx + 5]).float())
+            cur_idx += 5
+    data_loader = data.EvaluationDataLoader(temp_dir, p)
+    _compare_data_loader(data_loader)
+    _compare_data_loader(data_loader)
+    data_loader = data.EvaluationDataLoader(temp_dir, p, num_workers=4)
+    _compare_data_loader(data_loader)
