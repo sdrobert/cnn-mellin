@@ -13,13 +13,6 @@ __copyright__ = "Copyright 2018 Sean Robertson"
 
 
 class SpectDataParams(param.Parameterized):
-    num_deltas = param.Integer(
-        0, bounds=(0, None),
-        doc='The number of times to perform the rolling average. The number '
-        'of filters will be multiplied by 1 + num_deltas')
-
-
-class DataSetParams(param.Parameterized):
     # context windows are more model parameters than data parameters, but
     # we're going to extract them as part of the data loading process, which
     # is easily parallelized by the DataLoader
@@ -33,14 +26,23 @@ class DataSetParams(param.Parameterized):
         doc='How many frames to the right of (after) the current frame are '
         'included when determining the class of the current frame'
     )
+
+
+class DataSetParams(param.Parameterized):
     batch_size = param.Integer(
         10, bounds=(1, None),
-        doc='Batch size served. The final batch will be smaller, if necessary'
+        doc='Number of elements in a batch. For training, this is the total '
+        'number of context windows in a batch. For validation/testing, this '
+        'is the number of utterances to process at once'
     )
     seed = param.Integer(
         None,
         doc='The seed used to shuffle data. The seed is incremented at every '
         'epoch'
+    )
+    drop_last = param.Boolean(
+        False,
+        doc='Whether to drop the last batch if it does reach batch_size'
     )
 
 

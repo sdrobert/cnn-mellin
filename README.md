@@ -9,25 +9,19 @@ A simple CNN for TIMIT to test the performance of the Mellin convolution
    exit 0 # From this point you can run Karel's DNN : local/nnet/run_dnn.sh
    ```
    (right after `tri3` was force-aligned to the training set)
-3. In the `timit/s5` directory, run
-   ``` bash
-   steps/align_fmllr.sh data/dev data/lang exp/tri3 exp/tri3_ali_dev
-   ```
-   (this generates force-alignment of the dev set, used to control the learning
-   rate and early stopping of the network)
-4. Make symbolic links to some files in `wsj/s5`, as well as `timit/s5`
+3. Make symbolic links to some files in `wsj/s5`, as well as `timit/s5`
    ``` bash
    ln -s ../s5/path.sh .
    ln -s ../s5/cmd.sh .
    ln -s ../../wsj/s5/utils .
    ln -s ../../wsj/s5/steps .
    ```
-5. Install the local python package, preferably in a conda environment
+4. Install the local python package, preferably in a conda environment
    ``` bash
    # TODO: add conda requirements
    python setup.py develop
    ```
-6. Generate feature files and get them ready for pytorch. Here's an example for
+5. Generate feature files and get them ready for pytorch. Here's an example for
    SI filter banks
    ``` bash
    for x in train dev test; do
@@ -46,8 +40,4 @@ A simple CNN for TIMIT to test the performance of the Mellin convolution
    write-table-to-torch-dir \
     "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/tri3_ali/ali.*.gz |' ark:- |" \
     data/train/torch/ali
-   write-table-to-torch-dir \
-    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/tri3_ali_dev/ali.*.gz |' ark:- |" \
-    data/dev/torch/ali
    ```
-7. 

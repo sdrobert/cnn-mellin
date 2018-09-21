@@ -271,22 +271,22 @@ class UtteranceContextWindowDataSet(SpectDataSet):
 
     Parameters
     ----------
+    data_dir : str
     left : int
     right : int
-    data_dir : str
     file_suffix : str, optional
     warn_on_missing : bool, optional
 
     Attributes
     ----------
+    data_dir : str
     left : int
     right : int
-    data_dir : str
     has_ali : bool
     utt_ids : tuple
     '''
 
-    def __init__(self, left, right, data_dir, **kwargs):
+    def __init__(self, data_dir, left, right, **kwargs):
         super(UtteranceContextWindowDataSet, self).__init__(data_dir, **kwargs)
         self.left = left
         self.right = right
@@ -325,16 +325,16 @@ class SingleContextWindowDataSet(SpectDataSet):
 
     Parameters
     ----------
+    data_dir : str
     left : int
     right : int
-    data_dir : str
     has_ali : bool
     utt_ids : tuple
     utt_lens : tuple
         A tuple containing the number of frames of each utterance (i.e. ``T``)
     '''
 
-    def __init__(self, left, right, data_dir, **kwargs):
+    def __init__(self, data_dir, left, right, **kwargs):
         super(SingleContextWindowDataSet, self).__init__(data_dir, **kwargs)
         self.left = left
         self.right = right
@@ -376,7 +376,7 @@ class EpochRandomSampler(torch.utils.data.Sampler):
     ----------
     data_source : torch.data.utils.Dataset
         The total number of samples
-    epoch : int, optional
+    init_epoch : int, optional
         The initial epoch
     base_seed : int, optional
         Determines the starting seed of the sampler. Sampling is seeded with
@@ -400,10 +400,10 @@ class EpochRandomSampler(torch.utils.data.Sampler):
     >>> assert tuple(sampler.get_samples_for_epoch(1)) == samples_ep1
     '''
 
-    def __init__(self, data_source, epoch=0, base_seed=None):
+    def __init__(self, data_source, init_epoch=0, base_seed=None):
         super(EpochRandomSampler, self).__init__(data_source)
         self.data_source = data_source
-        self.epoch = epoch
+        self.epoch = init_epoch
         if base_seed is None:
             base_seed = np.random.randint(np.iinfo(np.uint32).max)
         self.base_seed = base_seed
@@ -459,3 +459,62 @@ def context_window_seq_to_batch(seq):
     if batch_ali is not None:
         batch_ali = torch.cat(batch_ali)
     return batch_feats, batch_ali
+
+
+class TrainingDataLoader(torch.utils.data.DataLoader):
+    '''Serve batches of context windows randomly for training
+
+    Parameters
+    ----------
+    data_dir : str
+        Path to the torch data directory. Should have the format
+        ::
+            data_dir/
+                feats/
+                    <utt1>.pt
+                    <utt2>.pt
+                    ...
+                ali/
+                    <utt1>.pt
+                    <utt2>.pt
+                    ...
+    params : cnn_model.params.SpectDataSetParams
+        Parameters for things like context window size, batch size, and
+        seed
+    init_epoch : int, optional
+        Where training should resume from
+    kwargs : keyword arguments, optional
+        Additional ``DataLoader`` arguments
+
+    Attributes
+    ----------
+    data_dir : str
+    params : cnn_model.params.SpectDataParams
+    '''
+
+    def __init__(self, data_dir, params, init_epoch=0, **kwargs):
+        for bad_kwarg in (
+                'batch_size', 'sampler', 'batch_sampler', 'shuffle',
+                'collate_fn'):
+            if bad_kwarg in kwargs:
+                raise TypeError(
+                    'keyword argument "{}" invalid for {} types'.format(
+                        bad_kwarg, type(self)))
+        self.data_dir = data_dir
+        self.params = params
+        data_source = SingleContextWindowDataSet(
+            data_dir, params.context_left, params.context_right)
+        if not data_source.has_ali:
+            raise ValueError(
+                "'{}' must have alignment info for training".format(
+                    data_dir))
+        sampler = EpochRandomSampler(
+            data_source, init_epoch=init_epoch, base_seed=params.seed)
+        batch_sampler = torch.utils.data.BatchSampler(
+            sampler, params.batch_size, drop_last=params.drop_last)
+        super(TrainingDataLoader, self).__init__(
+            data_source,
+            batch_sampler=batch_sampler,
+            collate_fn=context_window_seq_to_batch,
+            **kwargs
+        )
