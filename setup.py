@@ -68,6 +68,8 @@ if __name__ == '__main__':
                 'table_to_torch_dir',
                 'write-torch-dir-to-table = cnn_mellin.command_line:write_'
                 'torch_dir_to_table',
+                'get-torch-data-dir-info = cnn_mellin.command_line:get_torch_'
+                'data_dir_info',
             ]
         }
     )

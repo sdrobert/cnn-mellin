@@ -36,7 +36,6 @@ def test_write_table_to_torch_dir(temp_dir):
 
 @pytest.mark.cpu
 def test_write_torch_dir_to_table(temp_dir):
-    import torch
     in_dir = os.path.join(temp_dir, 'test_write_torch_dir_to_table')
     rwspecifier = 'ark:' + os.path.join(in_dir, 'table.ark')
     os.makedirs(in_dir)
@@ -55,3 +54,28 @@ def test_write_torch_dir_to_table(temp_dir):
     assert len(vals) == 3
     for dval, tval in zip((a, b, c), vals):
         assert torch.allclose(dval, torch.from_numpy(tval))
+
+
+@pytest.mark.cpu
+def test_get_torch_data_dir_info(temp_dir, populate_torch_dir):
+    _, alis, feat_sizes, _ = populate_torch_dir(
+        temp_dir, 19, num_filts=5, max_class=10)
+    # add one with class idx 10 to ensure all classes are accounted for
+    torch.save(torch.rand(1, 5), os.path.join(temp_dir, 'feats', 'utt19.pt'))
+    torch.save(torch.tensor([10]), os.path.join(temp_dir, 'ali', 'utt19.pt'))
+    feat_sizes += (1,)
+    alis = torch.cat(alis + [torch.tensor([10])])
+    alis = [class_idx.item() for class_idx in alis]
+    rwspecifier = 'ark:' + os.path.join(temp_dir, 'info.ark')
+    assert not command_line.get_torch_data_dir_info([temp_dir, rwspecifier])
+    with kaldi_open(rwspecifier, 'i', mode='r+') as table:
+        assert table['num_utterances'] == 20
+        assert table['total_frames'] == sum(feat_sizes)
+        assert table['num_filts'] == 5
+        for class_idx in range(11):
+            key = 'count_{:02d}'.format(class_idx)
+            assert table[key] == alis.count(class_idx)
+    # invalidate the data set and try again
+    torch.save(torch.rand(1, 4), os.path.join(temp_dir, 'feats', 'utt19.pt'))
+    with pytest.raises(ValueError):
+        command_line.get_torch_data_dir_info([temp_dir, rwspecifier])
