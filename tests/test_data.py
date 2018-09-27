@@ -265,7 +265,8 @@ def test_context_window_seq_to_batch(feat_sizes, include_ali):
             assert torch.allclose(torch.tensor(alis).float(), batch_ali)
 
 
-def test_training_data_loader(temp_dir, device, populate_torch_dir):
+@pytest.mark.cpu
+def test_training_data_loader(temp_dir, populate_torch_dir):
     populate_torch_dir(temp_dir, 5, num_filts=2)
     p = params.SpectDataSetParams(
         context_left=1,
@@ -274,8 +275,7 @@ def test_training_data_loader(temp_dir, device, populate_torch_dir):
         seed=2,
         drop_last=True,
     )
-    data_loader = data.TrainingDataLoader(
-        temp_dir, p, pin_memory=device == 'cuda')
+    data_loader = data.TrainingDataLoader(temp_dir, p)
     total_windows_ep0 = 0
     for feat, ali in data_loader:
         assert tuple(feat.size()) == (5, 3, 2)

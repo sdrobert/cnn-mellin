@@ -61,6 +61,8 @@ def train_am_for_epoch(
     ----------
     model : AcousticModel
     data_loader : TrainingDataLoader
+    optimizer : torch.optim.Optimizer
+    params : TrainingParams
     epoch : int, optional
         The epoch we are running. If unset, does not touch `data_loader`'s
         epoch
