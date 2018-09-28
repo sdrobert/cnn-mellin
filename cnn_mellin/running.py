@@ -37,7 +37,9 @@ def get_am_alignment_cross_entropy(
     total_loss = 0
     loss_fn = torch.nn.CrossEntropyLoss(weight=weight, reduction='sum')
     if cuda:
-        model = model.cuda()
+        model.cuda()
+    else:
+        model.cpu()
     model.eval()
     with torch.no_grad():
         for feats, ali, feat_sizes, _ in data_loader:
@@ -85,6 +87,10 @@ def train_am_for_epoch(
         data_loader.epoch = epoch
     if cuda:
         model.cuda()
+    else:
+        model.cpu()
+    # the call to train here actually shepherds the optimizer parameters over
+    # to
     model.train()
     if params.seed is not None:
         torch.manual_seed(params.seed + epoch)

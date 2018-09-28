@@ -295,7 +295,6 @@ def test_training_data_loader(temp_dir, populate_torch_dir):
         temp_dir, p,
         init_epoch=1,
         num_workers=4,
-        pin_memory=device == 'cuda'
     )
     feats_ep1_b, alis_ep1_b = [], []
     for feat, ali in data_loader:
@@ -328,6 +327,7 @@ def test_training_data_loader(temp_dir, populate_torch_dir):
     )
 
 
+@pytest.mark.cpu
 def test_evaluation_data_loader(temp_dir, device, populate_torch_dir):
     torch.manual_seed(1)
     feats_dir = os.path.join(temp_dir, 'feats')
@@ -347,16 +347,14 @@ def test_evaluation_data_loader(temp_dir, device, populate_torch_dir):
         for b_feats, b_alis, b_feat_sizes, b_utt_ids in data_loader:
             assert tuple(b_feats.size()[1:]) == (3, 5)
             assert b_feats.size()[0] == sum(b_feat_sizes)
-            assert b_utt_ids == tuple(utt_ids[cur_idx:cur_idx + 5])
+            assert tuple(b_utt_ids) == tuple(utt_ids[cur_idx:cur_idx + 5])
             assert torch.allclose(
                 b_feats[:, 1], torch.cat(feats[cur_idx:cur_idx + 5]))
             assert torch.allclose(
                 b_alis.float(), torch.cat(alis[cur_idx:cur_idx + 5]).float())
             cur_idx += 5
-    data_loader = data.EvaluationDataLoader(
-        temp_dir, p, pin_memory=device == 'cuda')
+    data_loader = data.EvaluationDataLoader(temp_dir, p)
     _compare_data_loader(data_loader)
     _compare_data_loader(data_loader)
-    data_loader = data.EvaluationDataLoader(
-        temp_dir, p, num_workers=4, pin_memory=device == 'cuda')
+    data_loader = data.EvaluationDataLoader(temp_dir, p, num_workers=4)
     _compare_data_loader(data_loader)

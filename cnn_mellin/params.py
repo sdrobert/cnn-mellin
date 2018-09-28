@@ -133,8 +133,8 @@ class TrainingParams(param.Parameterized):
         'no penalty is used'
     )
     early_stopping_threshold = param.Number(
-        0., bounds=(0, 100), softbounds=(0., 1.),
-        doc='Minimum improvement in error from the last best that resets the '
+        0., bounds=(0, None), softbounds=(0, 1.),
+        doc='Minimum improvement in xent from the last best that resets the '
         'early stopping clock. If zero, early stopping will not be performed'
     )
     early_stopping_patience = param.Integer(
@@ -142,11 +142,15 @@ class TrainingParams(param.Parameterized):
         doc='Number of epochs where, if the classifier has failed to '
         'improve it\'s error, training is halted'
     )
+    early_stopping_burnin = param.Integer(
+        0, bounds=(0, None), softbounds=(0, 10),
+        doc='Number of epochs before the early stopping criterion kicks in'
+    )
     reduce_lr_threshold = param.Number(
-        0., bounds=(0, 100), softbounds=(0., 1.),
-        doc='Minimum improvement in error from the last best that resets the '
+        0., bounds=(0, None), softbounds=(0, 1.),
+        doc='Minimum improvement in xent from the last best that resets the '
         'clock for reducing the learning rate. If zero, the learning rate '
-        'will not be reduced during training'
+        'will not be reduced during training. Se'
     )
     reduce_lr_factor = param.Number(
         None, bounds=(0, 1), softbounds=(0, .5),
@@ -155,10 +159,25 @@ class TrainingParams(param.Parameterized):
         'been no improvement in the error after "reduce_lr_patience" '
         'epochs. If unset, uses the pytorch defaults'
     )
-    reduce_lr_patience = param.Number(
+    reduce_lr_patience = param.Integer(
         1, bounds=(1, None), softbounds=(1, 30),
         doc='Number of epochs where, if the classifier has failed to '
         'improve it\'s error, the learning rate is reduced'
+    )
+    reduce_lr_cooldown = param.Integer(
+        0, bounds=(0, None), softbounds=(0, 10),
+        doc='Number of epochs after reducing the learning rate before we '
+        'resume checking improvements'
+    )
+    reduce_lr_log10_epsilon = param.Integer(
+        -8, bounds=(None, 0),
+        doc='The log10 absolute difference between error rates that, below '
+        'which, reducing the error rate is considered meaningless'
+    )
+    reduce_lr_burnin = param.Integer(
+        0, bounds=(0, None), softbounds=(0, 10),
+        doc='Number of epochs before the criterion for reducing the learning '
+        'rate kicks in'
     )
     seed = param.Integer(
         None,
@@ -168,4 +187,23 @@ class TrainingParams(param.Parameterized):
     dropout_prob = param.Magnitude(
         0.,
         doc='The probability of dropping a hidden unit during training'
+    )
+    keep_last_and_best_only = param.Boolean(
+        True,
+        doc='If the model is being saved, keep only the model and optimizer '
+        'parameters for the last and best epoch (in terms of validation loss).'
+        ' If False, save every epoch. See also "saved_model_fmt" and '
+        '"saved_optimizer_fmt"'
+    )
+    saved_model_fmt = param.String(
+        'model_{epoch:03d}.pt',
+        doc='The file name format string used to save model state information.'
+        ' Entries from the state csv are used to format this string (see '
+        'TrainingStateController)'
+    )
+    saved_optimizer_fmt = param.String(
+        'optim_{epoch:03d}.pt',
+        doc='The file name format string used to save optimizer state '
+        'information. Entries from the state csv are used to format this '
+        'string (see TrainingStateController)'
     )

@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import torch
 
+import pytest
 import cnn_mellin.running as running
 import cnn_mellin.data as data
 import cnn_mellin.params as params
@@ -83,7 +84,35 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
         model, data_loader, optimizer, train_p, cuda=device == 'cuda')
     assert loss_a > loss_b  # we learned something, maybe?
     optimizer.zero_grad()
-    model.reset_parameters()
+    # important! We have to initialize parameters on the same device to get the
+    # same results!
+    model.cpu().reset_parameters()
     loss_c = running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, epoch=0)
+        model, data_loader, optimizer, train_p, epoch=0, cuda=device == 'cuda')
     assert abs(loss_a - loss_c) < 1e-5
+
+
+@pytest.mark.gpu
+def test_train_am_for_epoch_changing_devices(temp_dir, populate_torch_dir):
+    populate_torch_dir(temp_dir, 50)
+    spect_p = params.SpectDataSetParams(
+        context_left=1,
+        context_right=1,
+        batch_size=5,
+        seed=2,
+        drop_last=True,
+    )
+    data_loader = data.TrainingDataLoader(temp_dir, spect_p, num_workers=4)
+    train_p = params.TrainingParams(
+        num_epochs=10,
+        seed=3,
+        dropout_prob=.5,
+    )
+    model = DummyAM(5, 11)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    running.train_am_for_epoch(
+        model, data_loader, optimizer, train_p, cuda=True)
+    running.train_am_for_epoch(
+        model, data_loader, optimizer, train_p, cuda=False)
+    running.train_am_for_epoch(
+        model, data_loader, optimizer, train_p, cuda=True)
