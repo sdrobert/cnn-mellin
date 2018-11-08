@@ -52,10 +52,10 @@ def test_get_am_alignment_cross_entropy(temp_dir, device, populate_torch_dir):
     data_loader = data.EvaluationDataLoader(temp_dir, p)
     model = DummyAM(5, 11)
     loss_a = running.get_am_alignment_cross_entropy(
-        model, data_loader, cuda=device == 'cuda')
+        model, data_loader, device=device)
     assert loss_a != 0.  # highly unlikely that it would be zero
     loss_b = running.get_am_alignment_cross_entropy(
-        model, data_loader, cuda=device == 'cuda')
+        model, data_loader, device=device)
     assert abs(loss_a - loss_b) < 1e-5
 
 
@@ -78,17 +78,17 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
     # important! Use optimizer without history
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     loss_a = running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, cuda=device == 'cuda')
+        model, data_loader, optimizer, train_p, device=device)
     assert loss_a != 0
     loss_b = running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, cuda=device == 'cuda')
+        model, data_loader, optimizer, train_p, device=device)
     assert loss_a > loss_b  # we learned something, maybe?
     optimizer.zero_grad()
     # important! We have to initialize parameters on the same device to get the
     # same results!
     model.cpu().reset_parameters()
     loss_c = running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, epoch=0, cuda=device == 'cuda')
+        model, data_loader, optimizer, train_p, epoch=0, device=device)
     assert abs(loss_a - loss_c) < 1e-5
 
 
@@ -111,8 +111,8 @@ def test_train_am_for_epoch_changing_devices(temp_dir, populate_torch_dir):
     model = DummyAM(5, 11)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, cuda=True)
+        model, data_loader, optimizer, train_p, device='cuda')
     running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, cuda=False)
+        model, data_loader, optimizer, train_p, device='cpu')
     running.train_am_for_epoch(
-        model, data_loader, optimizer, train_p, cuda=True)
+        model, data_loader, optimizer, train_p, device='cuda')
