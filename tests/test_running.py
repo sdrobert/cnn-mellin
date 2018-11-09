@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 import torch
-
 import pytest
 import cnn_mellin.running as running
 import cnn_mellin.data as data
@@ -15,32 +14,8 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
 
 
-class DummyAM(torch.nn.Module):
-    def __init__(self, num_filts, num_classes, seed=1):
-        super(DummyAM, self).__init__()
-        self.seed = seed
-        torch.manual_seed(seed)
-        self.fc = torch.nn.Linear(num_filts, num_classes)
-        self.drop = torch.nn.Dropout(p=0.5)
-
-    def forward(self, x):
-        x = self.fc(x)
-        return x.sum(1)  # sum out the context window
-
-    def reset_parameters(self):
-        torch.manual_seed(self.seed)
-        self.fc.reset_parameters()
-
-    @property
-    def dropout(self):
-        return self.drop.p
-
-    @dropout.setter
-    def dropout(self, p):
-        self.drop.p = p
-
-
-def test_get_am_alignment_cross_entropy(temp_dir, device, populate_torch_dir):
+def test_get_am_alignment_cross_entropy(
+        temp_dir, device, populate_torch_dir, DummyAM):
     populate_torch_dir(temp_dir, 50)
     p = params.SpectDataSetParams(
         context_left=1,
@@ -59,7 +34,7 @@ def test_get_am_alignment_cross_entropy(temp_dir, device, populate_torch_dir):
     assert abs(loss_a - loss_b) < 1e-5
 
 
-def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
+def test_train_am_for_epoch(temp_dir, device, populate_torch_dir, DummyAM):
     populate_torch_dir(temp_dir, 50)
     spect_p = params.SpectDataSetParams(
         context_left=1,
@@ -93,7 +68,8 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
 
 
 @pytest.mark.gpu
-def test_train_am_for_epoch_changing_devices(temp_dir, populate_torch_dir):
+def test_train_am_for_epoch_changing_devices(
+        temp_dir, populate_torch_dir, DummyAM):
     populate_torch_dir(temp_dir, 50)
     spect_p = params.SpectDataSetParams(
         context_left=1,
