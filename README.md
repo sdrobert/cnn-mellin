@@ -16,9 +16,9 @@ A simple CNN for TIMIT to test the performance of the Mellin convolution
    ln -s ../../wsj/s5/utils .
    ln -s ../../wsj/s5/steps .
    ```
-4. Install the local python package, preferably in a conda environment
+4. Install the local python package
    ``` bash
-   # TODO: add conda requirements
+   pip install -r requirements.txt
    python setup.py develop
    ```
 5. Generate feature files and get them ready for pytorch. Here's an example for

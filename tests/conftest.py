@@ -17,35 +17,6 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
 
 
-@pytest.fixture(scope='session')
-def DummyAM():
-
-    class _DummyAM(torch.nn.Module):
-        def __init__(self, num_filts, num_classes, seed=1):
-            super(_DummyAM, self).__init__()
-            self.seed = seed
-            torch.manual_seed(seed)
-            self.fc = torch.nn.Linear(num_filts, num_classes)
-            self.drop = torch.nn.Dropout(p=0.5)
-
-        def forward(self, x):
-            x = self.fc(x)
-            return x.sum(1)  # sum out the context window
-
-        def reset_parameters(self):
-            torch.manual_seed(self.seed)
-            self.fc.reset_parameters()
-
-        @property
-        def dropout(self):
-            return self.drop.p
-
-        @dropout.setter
-        def dropout(self, p):
-            self.drop.p = p
-    return _DummyAM
-
-
 @pytest.fixture
 def temp_dir():
     dir_name = mkdtemp()

@@ -5,8 +5,10 @@ from __future__ import division
 from __future__ import print_function
 
 import torch
+import param
+import pydrobert.torch.training as training
 
-from cnn_mellin.util import optimizer_to
+from pydrobert.torch.util import optimizer_to
 
 __author__ = "Sean Robertson"
 __email__ = "sdrobert@cs.toronto.edu"
@@ -52,6 +54,18 @@ def get_am_alignment_cross_entropy(
     return total_loss / total_windows
 
 
+class TrainingEpochParams(param.Parameterized):
+    seed = param.Integer(
+        None,
+        doc='The seed used to seed PyTorch at every epoch of training. Will '
+        'control things like dropout masks. Will be incremented at every '
+        'epoch. If unset, will not touch the torch seed.')
+    dropout_prob = param.Magnitude(
+        0.,
+        doc='The model dropout probability'
+    )
+
+
 def train_am_for_epoch(
         model, data_loader, optimizer, params,
         epoch=None, device='cpu', weight=None):
@@ -60,9 +74,13 @@ def train_am_for_epoch(
     Parameters
     ----------
     model : AcousticModel
-    data_loader : TrainingDataLoader
+    data_loader : pydrobert.torch.data.TrainingDataLoader
+    params : TrainingEpochParams
     optimizer : torch.optim.Optimizer
-    params : TrainingParams
+    init_seed : int, optional
+        The initial training seed. After every epoch, the torch seed will
+        be set to ``init_seed + epoch``. If unset, does not touch torch
+        seed
     epoch : int, optional
         The epoch we are running. If unset, does not touch `data_loader`'s
         epoch

@@ -26,7 +26,7 @@ if {'pytest', 'test', 'ptr'}.intersection(sys.argv):
     SETUP_REQUIRES += ['pytest-runner', 'pytest']
 
 INSTALL_REQUIRES = [
-    'numpy', 'six', 'future', 'pydrobert-kaldi', 'param'
+    'pydrobert-pytorch', 'pydrobert-gpyopt'
 ]
 try:
     import torch
@@ -64,12 +64,8 @@ if __name__ == '__main__':
         setup_requires=SETUP_REQUIRES,
         entry_points={
             'console_scripts': [
-                'write-table-to-torch-dir = cnn_mellin.command_line:write_'
-                'table_to_torch_dir',
-                'write-torch-dir-to-table = cnn_mellin.command_line:write_'
-                'torch_dir_to_table',
-                'get-torch-data-dir-info = cnn_mellin.command_line:get_torch_'
-                'data_dir_info',
+                'print-parameters-as-ini = cnn_mellin.command_line:'
+                'print_parameters_as_ini'
             ]
         }
     )
