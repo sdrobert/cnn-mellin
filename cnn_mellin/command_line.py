@@ -48,6 +48,11 @@ def _print_parameters_as_ini_parse_args(args):
         help='One or more INI files to populate parameters before printing '
         'all of them. Later config files clobber earlier set parameters'
     )
+    parser.add_argument(
+        '--add-help-string', action='store_true', default=False,
+        help='If set, will include parameter help strings at the start of the '
+        'printout'
+    )
     return parser.parse_args(args)
 
 
@@ -65,5 +70,7 @@ def print_parameters_as_ini(args=None):
         return ex.code
     param_dict = _construct_default_param_dict()
     for in_config in options.in_configs:
-        serial.serialze_from_ini(in_config, param_dict)
-    serial.serialize_to_ini(sys.stdout, param_dict)
+        serial.deserialize_from_ini(in_config, param_dict)
+    serial.serialize_to_ini(
+        sys.stdout, param_dict, include_help=options.add_help_string)
+    return 1
