@@ -46,3 +46,9 @@ def test_model_forward_backward_works(
         factor_sched=2, freq_factor=2, flatten_style=flatten_style,
     )
     model = models.AcousticModel(params, window)
+    torch.manual_seed(10)
+    x = torch.rand(3, window, freq_dim)
+    y = model(x)
+    assert y.size() == (3, target_dim)
+    y = y.sum()
+    y.backward()

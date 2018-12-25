@@ -139,7 +139,7 @@ class AcousticModel(torch.nn.Module):
             kw = params.kernel_time
             kh = params.kernel_freq
             dh = 1
-            ph = (kw - 1) // 2
+            ph = kh // 2
             if params.factor_sched is None:
                 sched = float('inf')
             else:
@@ -184,7 +184,7 @@ class AcousticModel(torch.nn.Module):
                     }
             else:
                 Conv = torch.nn.Conv2d
-                pw = (kw - 1) // 2
+                pw = kw // 2
                 dw = 1
 
                 def _update_size_and_kwargs(on):
@@ -197,7 +197,7 @@ class AcousticModel(torch.nn.Module):
                     sh = (prev_h + 2 * ph - dh * (kh - 1) - 1) // cur_h + 1
                     cur_h = (prev_h + 2 * ph - dh * (kh - 1) - 1) // sh + 1
                     sw = (prev_w + 2 * pw - dw * (kw - 1) - 1) // cur_w + 1
-                    cur_w = (prev_w + 2 * pw - dh * (kw - 1) - 1) // sw + 1
+                    cur_w = (prev_w + 2 * pw - dw * (kw - 1) - 1) // sw + 1
                     return cur_w, cur_h, {
                         'padding': (pw, ph),
                         'stride': (sw, sh),
@@ -243,18 +243,18 @@ class AcousticModel(torch.nn.Module):
 
     def forward(self, x):
         if self.params.num_conv:
-            x = x.unsqueeze(-1)
-            for conv, nonlin, drop in enumerate(
-                    zip(self.convs, self.nonlins, self.drops)):
+            x = x.unsqueeze(1)
+            for conv, nonlin, drop in zip(
+                    self.convs, self.nonlins, self.drops):
                 x = drop(nonlin(conv(x)))
             if self.params.flatten_style == 'keep_chans':
-                x = x.sum(-2)
+                x = x.sum(-1)
         x = x.view(-1, self.fcs[0].in_features)
         for layer_idx, fc in enumerate(self.fcs):
             x = fc(x)
-            if layer_idx < self.num_fc - 1:
-                x = self.nonlins[self.num_conv + layer_idx](x)
-                x = self.drops[self.num_conv + layer_idx](x)
+            if layer_idx < self.params.num_fc - 1:
+                x = self.nonlins[self.params.num_conv + layer_idx](x)
+                x = self.drops[self.params.num_conv + layer_idx](x)
         return x
 
     def reset_parameters(self):
