@@ -23,10 +23,10 @@ def test_model_parameters_are_same_after_seeded_reset():
 
 
 @pytest.mark.parametrize('mellin,mconv_decimation_strategy', [
-    # (False, 'pad-then-dec'),
+    (False, 'pad-then-dec'),
     (True, 'pad-then-dec'),
-    # (True, 'pad-to-dec-time-floor'),
-    # (True, 'pad-to-dec-time-ceil'),
+    (True, 'pad-to-dec-time-floor'),
+    (True, 'pad-to-dec-time-ceil'),
 ])
 @pytest.mark.parametrize('kernel', [1, 2, 3])
 @pytest.mark.parametrize('window', [1, 2, 3])
@@ -52,3 +52,16 @@ def test_model_forward_backward_works(
     assert y.size() == (3, target_dim)
     y = y.sum()
     y.backward()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize('mellin', [True, False])
+def test_model_to_gpu(mellin):
+    params = models.AcousticModelParams(
+        seed=2, mellin=mellin, target_dim=10, num_conv=1, num_fc=2,
+        freq_dim=10,
+    )
+    model = models.AcousticModel(params, 5).cuda()
+    torch.manual_seed(5)
+    x = torch.rand(2, 5, 10).cuda()
+    y = model(x)
