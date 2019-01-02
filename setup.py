@@ -65,7 +65,9 @@ if __name__ == '__main__':
         entry_points={
             'console_scripts': [
                 'print-parameters-as-ini = cnn_mellin.command_line:'
-                'print_parameters_as_ini'
+                'print_parameters_as_ini',
+                'train-acoustic-model = cnn_mellin.command_line:'
+                'train_acoustic_model',
             ]
         }
     )

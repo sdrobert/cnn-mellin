@@ -122,6 +122,10 @@ class AcousticModel(torch.nn.Module):
         self._drop_p = 0.0
         prev_w = window
         prev_h = params.freq_dim
+        if prev_h is None:
+            raise ValueError('freq_dim must be set!')
+        if params.target_dim is None:
+            raise ValueError('target_dim must be set!')
         if params.nonlinearity == 'relu':
             Nonlin = torch.nn.ReLU
         elif params.nonlinearity == 'sigmoid':

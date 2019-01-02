@@ -39,6 +39,8 @@ def get_am_alignment_cross_entropy(
         raise ValueError('There must be at least one batch of data!')
     total_windows = 0
     total_loss = 0
+    if weight is not None:
+        weight = weight.to(device)
     loss_fn = torch.nn.CrossEntropyLoss(weight=weight, reduction='sum')
     model = model.to(device)
     model.eval()
@@ -103,6 +105,8 @@ def train_am_for_epoch(
         data_loader.epoch = epoch
     model = model.to(device)
     optimizer_to(optimizer, device)
+    if weight is not None:
+        weight = weight.to(device)
     model.train()
     if params.seed is not None:
         torch.manual_seed(params.seed + epoch)
