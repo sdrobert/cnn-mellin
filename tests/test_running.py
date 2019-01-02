@@ -2,6 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+
 import torch
 import pytest
 import pydrobert.torch.data as data
@@ -55,6 +57,35 @@ def test_get_am_alignment_cross_entropy(temp_dir, device, populate_torch_dir):
     loss_b = running.get_am_alignment_cross_entropy(
         model, data_loader, device=device)
     assert abs(loss_a - loss_b) < 1e-5
+
+
+def test_write_am_pdfs(temp_dir, device, populate_torch_dir):
+    populate_torch_dir(temp_dir, 50, include_ali=False)
+    params = data.SpectDataSetParams(
+        context_left=2,
+        context_right=2,
+        batch_size=6,
+        seed=3,
+        drop_last=False,
+    )
+    data_loader = data.EvaluationDataLoader(temp_dir, params)
+    log_prior = torch.rand(11)
+    log_prior /= log_prior.sum()
+    model = DummyAM(5, 11)
+    running.write_am_pdfs(model, data_loader, log_prior, device=device)
+    file_list = os.listdir(os.path.join(temp_dir, 'pdfs'))
+    assert len(file_list) == 50
+    pdfs_a = dict()
+    for file_name in file_list:
+        feat = torch.load(os.path.join(temp_dir, 'feats', file_name))
+        pdf = torch.load(os.path.join(temp_dir, 'pdfs', file_name))
+        assert tuple(pdf.size()) == (feat.size()[0], 11)
+        pdfs_a[file_name] = pdf
+        os.remove(os.path.join(temp_dir, 'pdfs', file_name))
+    running.write_am_pdfs(model, data_loader, log_prior, device=device)
+    for file_name in file_list:
+        pdf = torch.load(os.path.join(temp_dir, 'pdfs', file_name))
+        assert torch.allclose(pdf, pdfs_a[file_name])
 
 
 def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):

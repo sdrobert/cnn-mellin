@@ -20,10 +20,10 @@ def get_am_alignment_cross_entropy(
         model, data_loader, device='cpu', weight=None):
     '''Get the mean cross entropy of alignments over a data set
 
-    Arguments
-    ---------
+    Parameters
+    ----------
     model : AcousticModel
-    data_loader : EvaluationDataLoader
+    data_loader : pydrobert.torch.data.EvaluationDataLoader
     device : torch.device or str, optional
         What device should the model/data be on
     weight : FloatTensor, optional
@@ -51,9 +51,39 @@ def get_am_alignment_cross_entropy(
                 raise ValueError('Alignments must be specified!')
             feats = feats.to(device)
             ali = ali.to(device)
-            pdfs = model(feats)
-            total_loss += loss_fn(pdfs, ali).item()
+            joint = model(feats)
+            total_loss += loss_fn(joint, ali).item()
     return total_loss / total_windows
+
+
+def write_am_pdfs(model, data_loader, log_prior, device='cpu'):
+    '''Write emission probabilities for a data set
+
+    Parameters
+    ----------
+    model : AcousticModel
+    data_loader : pydrobert.torch.data.EvaluationDataLoader
+    log_prior : FloatTensor
+        A prior distribution over the targets (senones), in natural logarithm.
+        `log_prior` is necessary for converting the joint distribution of
+        input and targets produced by the acoustic model into the probabilities
+        of inputs conditioned on the targets
+    device : torch.device or str, optional
+        What device to perform computations on. The pdfs will always be saved
+        as (cpu) ``torch.FloatTensor``s
+    '''
+    model = model.to(device)
+    log_prior = log_prior.to(device)
+    model.eval()
+    with torch.no_grad():
+        for feats, _, feat_sizes, utt_ids in data_loader:
+            feats = feats.to(device)
+            joint = model(feats)
+            pdf = joint - log_prior
+            for feat_size, utt_id in zip(feat_sizes, utt_ids):
+                pdf_utt = pdf[:feat_size]
+                data_loader.data_source.write_pdf(utt_id, pdf_utt)
+                pdf = pdf[feat_size:]
 
 
 class TrainingEpochParams(param.Parameterized):
