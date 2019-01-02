@@ -23,8 +23,8 @@ def test_model_parameters_are_same_after_seeded_reset():
 
 
 @pytest.mark.parametrize('mellin,mconv_decimation_strategy', [
-    (False, 'pad-then-dec'),
-    # (True, 'pad-then-dec'),
+    # (False, 'pad-then-dec'),
+    (True, 'pad-then-dec'),
     # (True, 'pad-to-dec-time-floor'),
     # (True, 'pad-to-dec-time-ceil'),
 ])

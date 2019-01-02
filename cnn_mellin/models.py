@@ -165,16 +165,16 @@ class AcousticModel(torch.nn.Module):
 
                 def _update_size_and_kwargs(on):
                     if on:
-                        pw, dw = on_pw, on_pw
+                        pw, dw = on_pw, on_dw
                         cur_w = (prev_w + decim_w - 1) // decim_w
                         cur_h = (prev_h + decim_h - 1) // decim_h
                     else:
-                        pw, dw = on_pw, on_dw
+                        pw, dw = off_pw, off_dw
                         cur_w = prev_w
                         cur_h = prev_h
                     sw = 1
                     rw = cur_w - ((pw + 1) * prev_w - 1) // (kw + dw - 1) - 1
-                    sh = (prev_h + ph - dh * (kh - 1) - 1) // cur_h + 1
+                    sh = (prev_h + - (dh - 1) * (kh - 1) - 1) // cur_h + 1
                     rh = cur_h - (prev_h + ph - dh * (kh - 1) - 1) // sh - 1
                     return cur_w, cur_h, {
                         'p': (pw, ph),
