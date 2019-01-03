@@ -56,7 +56,7 @@ def get_am_alignment_cross_entropy(
     return total_loss / total_windows
 
 
-def write_am_pdfs(model, data_loader, log_prior, device='cpu'):
+def write_am_pdfs(model, data_loader, log_prior, device='cpu', pdfs_dir=None):
     '''Write emission probabilities for a data set
 
     Parameters
@@ -71,6 +71,9 @@ def write_am_pdfs(model, data_loader, log_prior, device='cpu'):
     device : torch.device or str, optional
         What device to perform computations on. The pdfs will always be saved
         as (cpu) ``torch.FloatTensor``s
+    pdfs_dir : str or None, optional
+        If set, pdfs will be written to this directory. Otherwise, pdfs will
+        be written to the `data_loader`'s ``data_dir + '/pdfs'``
     '''
     model = model.to(device)
     log_prior = log_prior.to(device)
@@ -82,7 +85,8 @@ def write_am_pdfs(model, data_loader, log_prior, device='cpu'):
             pdf = joint - log_prior
             for feat_size, utt_id in zip(feat_sizes, utt_ids):
                 pdf_utt = pdf[:feat_size]
-                data_loader.data_source.write_pdf(utt_id, pdf_utt)
+                data_loader.data_source.write_pdf(
+                    utt_id, pdf_utt, pdfs_dir=pdfs_dir)
                 pdf = pdf[feat_size:]
 
 

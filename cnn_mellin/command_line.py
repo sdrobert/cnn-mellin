@@ -49,7 +49,7 @@ def _construct_default_training_param_dict():
     return OrderedDict((
         ('model', models.AcousticModelParams(name='model')),
         ('training', TrainingParams(name='training')),
-        ('data', data.SpectDataParams(name='data')),
+        ('data', data.ContextWindowDataParams(name='data')),
         ('train_data', data.DataSetParams(name='train_data')),
         ('val_data', data.DataSetParams(name='val_data')),
     ))
@@ -150,9 +150,9 @@ def train_acoustic_model(args=None):
         )
     else:
         weight_tensor = None
-    train_data = data.TrainingDataLoader(
+    train_data = data.ContextWindowTrainingDataLoader(
         options.train_dir,
-        data.SpectDataSetParams(
+        data.ContextWindowDataSetParams(
             name='train_data_set',
             **param.param_union(
                 options.config['data'],
@@ -162,7 +162,7 @@ def train_acoustic_model(args=None):
         pin_memory=(options.device.type == 'cuda'),
         num_workers=options.train_num_data_workers,
     )
-    val_data = data.EvaluationDataLoader(
+    val_data = data.ContextWindowEvaluationDataLoader(
         options.val_dir,
         data.SpectDataSetParams(
             name='val_data_set',

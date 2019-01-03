@@ -42,14 +42,14 @@ class DummyAM(torch.nn.Module):
 
 def test_get_am_alignment_cross_entropy(temp_dir, device, populate_torch_dir):
     populate_torch_dir(temp_dir, 50)
-    params = data.SpectDataSetParams(
+    params = data.ContextWindowDataSetParams(
         context_left=1,
         context_right=1,
         batch_size=5,
         seed=2,
         drop_last=True,
     )
-    data_loader = data.EvaluationDataLoader(temp_dir, params)
+    data_loader = data.ContextWindowEvaluationDataLoader(temp_dir, params)
     model = DummyAM(5, 11)
     loss_a = running.get_am_alignment_cross_entropy(
         model, data_loader, device=device)
@@ -61,14 +61,14 @@ def test_get_am_alignment_cross_entropy(temp_dir, device, populate_torch_dir):
 
 def test_write_am_pdfs(temp_dir, device, populate_torch_dir):
     populate_torch_dir(temp_dir, 50, include_ali=False)
-    params = data.SpectDataSetParams(
+    params = data.ContextWindowDataSetParams(
         context_left=2,
         context_right=2,
         batch_size=6,
         seed=3,
         drop_last=False,
     )
-    data_loader = data.EvaluationDataLoader(temp_dir, params)
+    data_loader = data.ContextWindowEvaluationDataLoader(temp_dir, params)
     log_prior = torch.rand(11)
     log_prior /= log_prior.sum()
     model = DummyAM(5, 11)
@@ -81,23 +81,25 @@ def test_write_am_pdfs(temp_dir, device, populate_torch_dir):
         pdf = torch.load(os.path.join(temp_dir, 'pdfs', file_name))
         assert tuple(pdf.size()) == (feat.size()[0], 11)
         pdfs_a[file_name] = pdf
-        os.remove(os.path.join(temp_dir, 'pdfs', file_name))
-    running.write_am_pdfs(model, data_loader, log_prior, device=device)
+    running.write_am_pdfs(
+        model, data_loader, log_prior,
+        device=device, pdfs_dir=os.path.join(temp_dir, 'zoo'))
     for file_name in file_list:
-        pdf = torch.load(os.path.join(temp_dir, 'pdfs', file_name))
+        pdf = torch.load(os.path.join(temp_dir, 'zoo', file_name))
         assert torch.allclose(pdf, pdfs_a[file_name])
 
 
 def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
     populate_torch_dir(temp_dir, 50)
-    spect_p = data.SpectDataSetParams(
+    spect_p = data.ContextWindowDataSetParams(
         context_left=1,
         context_right=1,
         batch_size=5,
         seed=2,
         drop_last=True,
     )
-    data_loader = data.TrainingDataLoader(temp_dir, spect_p, num_workers=4)
+    data_loader = data.ContextWindowTrainingDataLoader(
+        temp_dir, spect_p, num_workers=4)
     train_p = running.TrainingEpochParams(
         num_epochs=10,
         seed=3,
@@ -124,14 +126,15 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
 @pytest.mark.gpu
 def test_train_am_for_epoch_changing_devices(temp_dir, populate_torch_dir):
     populate_torch_dir(temp_dir, 50)
-    spect_p = data.SpectDataSetParams(
+    spect_p = data.ContextWindowDataSetParams(
         context_left=1,
         context_right=1,
         batch_size=5,
         seed=2,
         drop_last=True,
     )
-    data_loader = data.TrainingDataLoader(temp_dir, spect_p, num_workers=4)
+    data_loader = data.ContextWindowTrainingDataLoader(
+        temp_dir, spect_p, num_workers=4)
     model = DummyAM(5, 11)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     train_p = running.TrainingEpochParams(seed=3)
