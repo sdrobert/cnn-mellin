@@ -81,7 +81,8 @@ def write_am_pdfs(model, data_loader, log_prior, device='cpu', pdfs_dir=None):
     with torch.no_grad():
         for feats, _, feat_sizes, utt_ids in data_loader:
             feats = feats.to(device)
-            joint = model(feats)
+            y = model(feats)
+            joint = torch.nn.functional.log_softmax(y, dim=1)
             pdf = joint - log_prior
             for feat_size, utt_id in zip(feat_sizes, utt_ids):
                 pdf_utt = pdf[:feat_size]

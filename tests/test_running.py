@@ -80,6 +80,8 @@ def test_write_am_pdfs(temp_dir, device, populate_torch_dir):
         feat = torch.load(os.path.join(temp_dir, 'feats', file_name))
         pdf = torch.load(os.path.join(temp_dir, 'pdfs', file_name))
         assert tuple(pdf.size()) == (feat.size()[0], 11)
+        assert torch.allclose(
+            torch.exp(pdf + log_prior).sum(1), torch.tensor(1.))
         pdfs_a[file_name] = pdf
     running.write_am_pdfs(
         model, data_loader, log_prior,
