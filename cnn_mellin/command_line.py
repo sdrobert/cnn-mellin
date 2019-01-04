@@ -29,11 +29,6 @@ __copyright__ = "Copyright 2018 Sean Robertson"
 def _construct_default_param_dict():
     class TrainingParams(
             running.TrainingEpochParams, training.TrainingStateParams):
-        weight_tensor_file = param.Filename(
-            None,
-            doc='Path to a stored tensor containing class weights. '
-            'If None, training will be uniform'
-        )
         optimizer = param.ObjectSelector(
             torch.optim.Adam, objects={
                 'adam': torch.optim.Adam,
@@ -338,6 +333,11 @@ def _train_acoustic_model_parse_args(args):
         'than the number of CPUs available'
     )
     parser.add_argument(
+        '--weight-tensor-file', type=argparse.FileType('rb'), default=None,
+        help='Path to a stored tensor containing class weights. If unset, '
+        'training will be uniform'
+    )
+    parser.add_argument(
         '--state-csv',
         default=None,
         help='Where to store the training history CSV file. Set this if you '
@@ -363,9 +363,9 @@ def train_acoustic_model(args=None):
         1 + options.config['data'].context_left +
         options.config['data'].context_right,
     )
-    if options.config['training'].weight_tensor_file is not None:
+    if options.weight_tensor_file is not None:
         weight_tensor = torch.load(
-            options.config['training'].weight_tensor_file,
+            options.weight_tensor_file,
             map_location=options.device,
         )
     else:

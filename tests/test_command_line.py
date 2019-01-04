@@ -245,10 +245,9 @@ def test_train_acoustic_model(temp_dir, populate_torch_dir):
             'log10_learning_rate = -2\n'
             'num_epochs = 1\n'
             'seed = 2\n'
-            'weight_tensor_file = {}\n'
-            'saved_model_fmt = foo-{{epoch}}.pt\n'
+            'saved_model_fmt = foo-{epoch}.pt\n'
             '[train_data]\n'
-            'seed = 3\n'.format(weight_pt_file)
+            'seed = 3\n'
         )
     state_dir = os.path.join(temp_dir, 'states')
     train_dir = os.path.join(temp_dir, 'train')
@@ -256,6 +255,7 @@ def test_train_acoustic_model(temp_dir, populate_torch_dir):
     populate_torch_dir(train_dir, 10, num_filts=3)
     populate_torch_dir(val_dir, 5, num_filts=3)
     assert not command_line.train_acoustic_model([
+        '--weight-tensor-file', weight_pt_file,
         '--config', ini_path,
         '--device', 'cpu',
         state_dir,
@@ -280,13 +280,13 @@ def test_train_acoustic_model(temp_dir, populate_torch_dir):
             'log10_learning_rate = -2\n'
             'num_epochs = 2\n'
             'seed = 2\n'
-            'weight_tensor_file = {}\n'
-            'saved_model_fmt = foo-{{epoch}}.pt\n'
+            'saved_model_fmt = foo-{epoch}.pt\n'
             'keep_last_and_best_only = false\n'
             '[train_data]\n'
-            'seed = 3\n'.format(weight_pt_file)
+            'seed = 3\n'
         )
     assert not command_line.train_acoustic_model([
+        '--weight-tensor-file', weight_pt_file,
         '--config', ini_path,
         '--device', 'cuda',
         state_dir,
