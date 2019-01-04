@@ -1,4 +1,3 @@
 pydrobert-pytorch
-pydrobert-gpyopt
 pydrobert-param
 pydrobert-mellin
