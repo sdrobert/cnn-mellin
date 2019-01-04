@@ -47,6 +47,44 @@ def test_read_and_write_print_parameters_as_ini(capsys, temp_dir):
     assert s.out.find('time_factor = 30') != -1
 
 
+def test_target_count_info_to_tensor(temp_dir):
+    info_file = os.path.join(temp_dir, 'info.ark')
+    with open(info_file, 'w') as f:
+        f.write(
+            'num_utterances 10\n'
+            'num_filts 4\n'
+            'total_frames 100\n'
+            'count_01 4\n'
+            'count_02 0\n'
+            'count_03 50\n'
+            'count_04 20\n'
+            'count_05 26\n'
+        )
+    weight_file = os.path.join(temp_dir, 'weight.pt')
+    assert not command_line.target_count_info_to_tensor([
+        '--min-count', '0',
+        info_file,
+        'inv_weight',
+        weight_file,
+    ])
+    exp_weight_tensor = torch.FloatTensor([0, 4, 0, 50, 20, 26])
+    exp_weight_tensor = (100. - exp_weight_tensor) / 100.
+    act_weight_tensor = torch.load(weight_file)
+    assert torch.allclose(exp_weight_tensor, act_weight_tensor)
+    prior_file = os.path.join(temp_dir, 'prior.pt')
+    assert not command_line.target_count_info_to_tensor([
+        '--num-targets', '7',
+        info_file,
+        'log_prior',
+        prior_file,
+    ])
+    exp_prior_tensor = torch.FloatTensor([1, 4, 1, 50, 20, 26, 1])
+    exp_prior_tensor /= exp_prior_tensor.sum()
+    exp_prior_tensor = torch.log(exp_prior_tensor)
+    act_prior_tensor = torch.load(prior_file)
+    assert torch.allclose(exp_prior_tensor, act_prior_tensor)
+
+
 @pytest.fixture
 def DummyAM():
 

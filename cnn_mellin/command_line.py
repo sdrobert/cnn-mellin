@@ -94,6 +94,104 @@ def print_parameters_as_ini(args=None):
     return 0
 
 
+def _target_count_info_to_tensor(args):
+    parser = argparse.ArgumentParser(
+        description=target_count_info_to_tensor.__doc__
+    )
+    parser.add_argument(
+        '--num-targets', type=int, default=None,
+        help='The total number of targets. If num-targets is fewer than the '
+        'maximum count index + 1 from the in_file, this command will error. '
+        'If unset, num-targets will be inferred to be the maximum count index '
+        '+ 1 from the in_file'
+    )
+    parser.add_argument(
+        '--min-count', type=int, default=1,
+        help='If a count is less than this value, it will be increased to this'
+        'value'
+    )
+    parser.add_argument(
+        'in_file', type=argparse.FileType('r'),
+        help='The info file'
+    )
+    parser.add_argument(
+        'tensor_type', choices=['inv_weight', 'log_prior'],
+        help='What to convert the counts to. inv_weight = an inverse '
+        'weight vector. Targets are weighed according to how frequently they '
+        '*do not* show up in data ((total - count) / total). log_prior = the '
+        'frequentist estimate of the probability of seeing a target, in the '
+        'log domain (log(count / total))'
+    )
+    parser.add_argument(
+        'out_file', type=argparse.FileType('wb'),
+        help='The file path to write the float tensor to'
+    )
+    return parser.parse_args(args)
+
+
+# FIXME(sdrobert): should this be in pydrobert-pytorch?
+def target_count_info_to_tensor(args=None):
+    '''Convert SpectData info file target counts to a FloatTensor
+
+    Given a file produced by get-torch-spect-data-dir-info on a torch data
+    directory with an ``ali`` directory, this function converts target counts
+    to a ``torch.FloatTensor``, which can be used in the training or decoding
+    processes
+    '''
+    try:
+        options = _target_count_info_to_tensor(args)
+    except SystemExit as ex:
+        return ex.code
+    count_dict = dict()
+    for line in options.in_file:
+        key, count = line.strip().split(' ')
+        if key.startswith('count_'):
+            target = int(key[6:])
+            count_dict[target] = int(count)
+    if not len(count_dict):
+        if options.num_targets is not None:
+            warnings.warn(
+                'No counts were found in "{}". Are you sure the directory it '
+                'came from included alignments?'.format(options.in_file.name)
+            )
+        else:
+            print(
+                'No counts were found in "{}" and the number of targets is '
+                'unknown. Are you sure the directory it came from included '
+                'aligments?'.format(options.in_file.name),
+                file=sys.stderr
+            )
+            return 1
+    max_target = max(count_dict.keys(), default=-1)
+    if options.num_targets is None:
+        num_targets = max_target + 1
+    else:
+        num_targets = options.num_targets
+        if max_target >= num_targets:
+            print(
+                'Saw count with ID={}, but --num-targets={}'.format(
+                    max_target, num_targets),
+                file=sys.stderr
+            )
+            return 1
+    counts = []
+    total = 0
+    for target in range(num_targets):
+        count = max(count_dict.get(target, 0), options.min_count)
+        total += count
+        counts.append(count)
+    if not total:
+        print('Total count was 0', file=sys.stderr)
+        return 1
+    counts = torch.FloatTensor(counts)
+    if options.tensor_type == 'inv_weight':
+        t = (total - counts) / total
+    else:
+        t = torch.log(counts / total)
+    torch.save(t, options.out_file)
+    return 0
+
+
 def _acoustic_model_forward_pdfs_parse_args(args):
     parser = argparse.ArgumentParser(
         description=acoustic_model_forward_pdfs.__doc__
