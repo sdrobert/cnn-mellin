@@ -68,6 +68,8 @@ if __name__ == '__main__':
                 'print_parameters_as_ini',
                 'train-acoustic-model = cnn_mellin.command_line:'
                 'train_acoustic_model',
+                'acoustic-model-forward-pdfs = cnn_mellin.command_line:'
+                'acoustic_model_forward_pdfs'
             ]
         }
     )

@@ -7,6 +7,7 @@ from __future__ import print_function
 import argparse
 import sys
 import os
+import warnings
 
 from collections import OrderedDict
 
@@ -25,7 +26,7 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
 
 
-def _construct_default_training_param_dict():
+def _construct_default_param_dict():
     class TrainingParams(
             running.TrainingEpochParams, training.TrainingStateParams):
         weight_tensor_file = param.Filename(
@@ -52,6 +53,7 @@ def _construct_default_training_param_dict():
         ('data', data.ContextWindowDataParams(name='data')),
         ('train_data', data.DataSetParams(name='train_data')),
         ('val_data', data.DataSetParams(name='val_data')),
+        ('pdfs_data', data.DataSetParams(name='pdfs_data')),
     ))
 
 
@@ -84,7 +86,7 @@ def print_parameters_as_ini(args=None):
         options = _print_parameters_as_ini_parse_args(args)
     except SystemExit as ex:
         return ex.code
-    param_dict = _construct_default_training_param_dict()
+    param_dict = _construct_default_param_dict()
     for in_config in options.in_configs:
         serial.deserialize_from_ini(in_config, param_dict)
     serial.serialize_to_ini(
@@ -92,15 +94,135 @@ def print_parameters_as_ini(args=None):
     return 0
 
 
+def _acoustic_model_forward_pdfs_parse_args(args):
+    parser = argparse.ArgumentParser(
+        description=acoustic_model_forward_pdfs.__doc__
+    )
+    param_dict = _construct_default_param_dict()
+    parser.add_argument(
+        '--config',
+        action=pargparse.ParameterizedIniReadAction,
+        help='Read in a INI (config) file for settings',
+        parameterized=param_dict,
+    )
+    parser.add_argument(
+        '--device',
+        type=torch.device,
+        default=torch.device('cuda'),
+        help='The torch device to run the forward step on'
+    )
+    parser.add_argument(
+        '--pdfs-dir', default=None,
+        help='Directory to save pdfs to. If unset, will write to data_dir + '
+        "'/pdfs'"
+    )
+    parser.add_argument(
+        'log_prior_file',
+        help='A file containing a FloatTensor of log-prior distribution over '
+        'targets'
+    )
+    parser.add_argument('data_dir', help='Path to feat data directory')
+    subparser = parser.add_subparsers(
+        title='model acquisition', dest='model',
+        description='How to get a hold of the model parameters we use'
+    )
+    path_parser = subparser.add_parser(
+        'path', help='Load model parameters from a simple path'
+    )
+    path_parser.add_argument('model_path')
+    history_parser = subparser.add_parser(
+        'history',
+        help='Load the model from the history of a model\'s training. By '
+        'default, loads the best model (in terms of validation loss)'
+    )
+    history_parser.add_argument(
+        'state_dir',
+        help='The directory where the training states, including model '
+        'parameters, is located'
+    )
+    history_parser.add_argument(
+        'state_csv',
+        help='A path to the CSV file where the training history is listed'
+    )
+    history_parser.add_argument(
+        '--last', default=False, action='store_true',
+        help='If set, will load the last model (in terms of epochs) instead '
+        'of the best model'
+    )
+    return parser.parse_args(args)
+
+
+def acoustic_model_forward_pdfs(args=None):
+    '''Write emission probabilities from cnn-mellin'''
+    try:
+        options = _acoustic_model_forward_pdfs_parse_args(args)
+    except SystemExit as ex:
+        return ex.code
+    model = models.AcousticModel(
+        options.config['model'],
+        1 + options.config['data'].context_left +
+        options.config['data'].context_right,
+    )
+    if options.model == 'path':
+        model_path = options.model_path
+    else:
+        controller = training.TrainingStateController(
+            options.config['training'],
+            state_csv_path=options.state_csv,
+            state_dir=options.state_dir
+        )
+        if options.last:
+            epoch = controller.get_last_epoch()
+        else:
+            epoch = controller.get_best_epoch()
+        if epoch:
+            info = controller.get_info(epoch)
+            model_path = os.path.join(
+                options.state_dir,
+                controller.params.saved_model_fmt.format(**info)
+            )
+        else:
+            warnings.warn(
+                'There are no training logs listed in "{}"! pdfs will be '
+                'random'
+            )
+            model_path = None
+        del controller
+    if model_path is not None:
+        model_device = next(model.parameters()).device
+        state_dict = torch.load(model_path, map_location=model_device)
+        model.load_state_dict(state_dict)
+        del state_dict
+    log_prior = torch.load(options.log_prior_file, map_location=options.device)
+    pdfs_data = data.ContextWindowEvaluationDataLoader(
+        options.data_dir,
+        data.ContextWindowDataSetParams(
+            name='pdfs_data_set',
+            **param.param_union(
+                options.config['data'],
+                options.config['pdfs_data'],
+            )
+        ),
+    )
+    running.write_am_pdfs(
+        model,
+        pdfs_data,
+        log_prior,
+        device=options.device,
+        pdfs_dir=options.pdfs_dir,
+    )
+    return 0
+
+
 def _train_acoustic_model_parse_args(args):
     parser = argparse.ArgumentParser(
         description=train_acoustic_model.__doc__
     )
-    param_dict = _construct_default_training_param_dict()
+    param_dict = _construct_default_param_dict()
     parser.add_argument(
         '--config',
         action=pargparse.ParameterizedIniReadAction,
-        help='Read in a training INI (config) file',
+        help='Read in a INI (config) file for settings',
         parameterized=param_dict,
     )
     parser.add_argument(
@@ -146,7 +268,7 @@ def train_acoustic_model(args=None):
     if options.config['training'].weight_tensor_file is not None:
         weight_tensor = torch.load(
             options.config['training'].weight_tensor_file,
-            map_location=torch.device('cpu')
+            map_location=options.device,
         )
     else:
         weight_tensor = None
@@ -164,13 +286,13 @@ def train_acoustic_model(args=None):
     )
     val_data = data.ContextWindowEvaluationDataLoader(
         options.val_dir,
-        data.SpectDataSetParams(
+        data.ContextWindowDataSetParams(
             name='val_data_set',
             **param.param_union(
                 options.config['data'],
                 options.config['val_data'],
             )
-        )
+        ),
     )
     controller = training.TrainingStateController(
         options.config['training'],
@@ -183,7 +305,9 @@ def train_acoustic_model(args=None):
     )
     controller.load_model_and_optimizer_for_epoch(
         model, optimizer, controller.get_last_epoch())
-    for epoch in range(options.config['training'].num_epochs):
+    for epoch in range(
+            controller.get_last_epoch() + 1,
+            options.config['training'].num_epochs + 1):
         train_loss = running.train_am_for_epoch(
             model,
             train_data,
