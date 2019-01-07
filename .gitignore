@@ -109,7 +109,7 @@ venv.bak/
 .ftpignore
 steps/
 utils/
-path.sh
+local/
 cmd.sh
 .python_version
 data/
