@@ -69,7 +69,7 @@ if __name__ == '__main__':
                 'train-acoustic-model = cnn_mellin.command_line:'
                 'train_acoustic_model',
                 'acoustic-model-forward-pdfs = cnn_mellin.command_line:'
-                'acoustic_model_forward_pdfs'
+                'acoustic_model_forward_pdfs',
                 'target-count-info-to-tensor = cnn_mellin.command_line:'
                 'target_count_info_to_tensor'
             ]

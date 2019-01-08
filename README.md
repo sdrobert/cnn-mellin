@@ -52,10 +52,18 @@ an acoustic model
 6. Generate appropriate feature files. Here's an example for
    speaker-independent f-bank features (called from this directory):
    ``` bash
+   . path.sh
    for x in train dev test; do
      mkdir -p data/kaldi/fbank/$x
-     cp ../s5/data/$x/{glm,spk2gender,spk2utt,stm,text,utt2spk,wav.scp} \
+     cp ../s5/data/$x/{glm,stm,text,wav.scp} \
         data/kaldi/fbank/$x/
+    paste \
+      <(cut -d' ' -f 1 ../s5/data/$x/utt2spk) \
+      <(cut -d' ' -f 1 ../s5/data/$x/utt2spk) > \
+      data/kaldi/fbank/$x/utt2spk
+    utils/utt2spk_to_spk2utt.pl \
+      data/kaldi/fbank/$x/utt2spk \
+      > data/kaldi/fbank/$x/spk2utt
      # careful! uses conf/fbank.conf
      steps/make_fbank.sh data/kaldi/fbank/$x exp/make_fbank/$x fbank
      compute-cmvn-stats \
@@ -69,8 +77,15 @@ an acoustic model
    ``` bash
    for x in train dev test; do
      mkdir -p data/kaldi/tonebank/$x
-     cp ../s5/data/$x/{glm,spk2gender,spk2utt,stm,text,utt2spk,wav.scp} \
+     cp ../s5/data/$x/{glm,stm,text,wav.scp} \
         data/kaldi/tonebank/$x/
+    paste \
+      <(cut -d' ' -f 1 ../s5/data/$x/utt2spk) \
+      <(cut -d' ' -f 1 ../s5/data/$x/utt2spk) > \
+      data/kaldi/tonebank/$x/utt2spk
+    utils/utt2spk_to_spk2utt.pl \
+      data/kaldi/tonebank/$x/utt2spk \
+      > data/kaldi/tonebank/$x/spk2utt
      stepsext/make_pybank.sh \
         --pybank-json conf/tonebank_41.json \
         data/kaldi/tonebank/$x \
@@ -88,42 +103,42 @@ an acoustic model
    say you're using _tri3_ alignments and the f-bank features from above. You
    can combine them as follows:
    ``` bash
-   for x in train dev test; do
+    for x in train dev test; do
      mkdir -p data/torch/fbank/$x
      write-table-to-torch-dir \
-      "ark:apply-cmvn 'data/kaldi/fbank/train/cmvn.scp' 'scp:data/kaldi/fbank/$x/feats.scp' ark:- |" \
+      "ark:apply-cmvn 'scp:data/kaldi/fbank/$x/cmvn.scp' 'scp:data/kaldi/fbank/$x/feats.scp' ark:- |" \
       data/torch/fbank/$x/feats
-   done
-   write-table-to-torch-dir \
-    -i i \
-    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/tri3_ali/ali.*.gz |' ark:- |" \
+    done
+    write-table-to-torch-dir \
+    -i iv -o long \
+    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/exp/tri3_ali/ali.*.gz |' ark:- |" \
     data/torch/fbank/train/ali
-   write-table-to-torch-dir \
-    -i i \
-    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/tri3_ali_dev/ali.*.gz |' ark:- |" \
+    write-table-to-torch-dir \
+    -i iv -o long \
+    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/exp/tri3_ali_dev/ali.*.gz |' ark:- |" \
     data/torch/fbank/dev/ali
-   get-torch-spect-data-dir-info --strict data/torch/fbank/dev /dev/null
-   get-torch-spect-data-dir-info --strict data/torch/fbank/test /dev/null
-   get-torch-spect-data-dir-info \
+    get-torch-spect-data-dir-info --strict data/torch/fbank/dev /dev/null
+    get-torch-spect-data-dir-info --strict data/torch/fbank/test /dev/null
+    get-torch-spect-data-dir-info \
     --strict data/torch/fbank/train data/torch/fbank/info.ark
-   num_targets=$(hmm-info ../s5/exp/tri3/final.mdl | awk '/pdfs/ {print $4}')
-   target-count-info-to-tensor \
+    num_targets=$(hmm-info ../s5/exp/tri3/final.mdl | awk '/pdfs/ {print $4}')
+    target-count-info-to-tensor \
     --num-targets ${num_targets} \
-    data/torch/fbank/info.ark inv_weights data/torch/fbank/weights.pt
-   target-count-info-to-tensor \
+    data/torch/fbank/info.ark inv_weight data/torch/fbank/weights.pt
+    target-count-info-to-tensor \
     --num-targets ${num_targets} \
     data/torch/fbank/info.ark log_prior data/torch/fbank/log_prior.pt
-   echo "\
-   freq_dim=${num_targets}
-   target_dim=$(awk '$1 == "num_filts" {print $2}' data/torch/fbank/info.ark)
-   HCLG='$(cd ../s5/exp/tri3/graph; pwd -P)/HCLG.fst'
-   gmm_mdl='$(cd ../s5/exp/tri3; pwd -P)/final.mdl'
-   weight_file='$(pwd -P)/data/torch/fbank/weights.pt'
-   log_prior='$(pwd -P)/data/torch/fbank/log_prior.pt'
-   train_data='$(pwd -P)/data/torch/train'
-   dev_data='$(pwd- P)/data/torch/dev'
-   test_data='$(pwd -p)/data/torch/test'
-   " > data/torch/fbank/variables
+    echo "\
+freq_dim=${num_targets}
+target_dim=$(awk '$1 == "num_filts" {print $2}' data/torch/fbank/info.ark)
+HCLG='$(cd ../s5/exp/tri3/graph; pwd -P)/HCLG.fst'
+gmm_mdl='$(cd ../s5/exp/tri3; pwd -P)/final.mdl'
+weight_file='$(pwd -P)/data/torch/fbank/weights.pt'
+log_prior='$(pwd -P)/data/torch/fbank/log_prior.pt'
+train_data='$(pwd -P)/data/torch/train'
+dev_data='$(pwd -P)/data/torch/dev'
+test_data='$(pwd -P)/data/torch/test'
+    " > data/torch/fbank/variables
    ```
    The process is the same for any combination of features and alignments
    (assuming the number of alignment frames and feature frames match).
@@ -186,35 +201,23 @@ The method assumes a specific structure of the _kaldi/egs/timit/cnn-mellin_
 directory:
 ```
 cnn-mellin/
-  data/torch/
-    <feats_1>/
-      variables
-      train
-      dev
-      test
-    <feats_2>/
-      ...
-    ...
   exp/
     matrix
-    <feats_1>/
-      <config_1>/
-        1/
-          variables
-          ...
-        2/
-          ...
+    <config_1>/
+      1/
+        variables
         ...
-      <config_2>/
-        1/
-          ...
-        2/
-          ...
-    <feats_2>/
+      2/
+        ...
       ...
+    <config_2>/
+      1/
+        ...
+      2/
+        ...
     ...
 ```
 We set up each experimental trial in a subdirectory
-_exp/feat_name/config_name/trial_number_, which contains a file called
-_variables_ that contains bash variables set to experiment specifics. We can
-generate this matrix using the script _stepsext/generate_matrix.sh_
+_exp/config_name/trial_number_, which contains a file called _variables_ that
+contains bash variables set to experiment specifics. We can generate this
+matrix using the script _stepsext/generate_matrix.sh_.
