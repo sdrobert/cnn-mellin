@@ -43,9 +43,13 @@ gmm_mdl     : path to the '.mdl' file Kaldi uses as part of the decoding
               process
 log_prior   : path to a FloatTensor containing log prior probabilities of each
               target
-train_data  : absolute path to training data directory
-dev_data    : absolute path to validation data directory
-test_data   : absolute path to test data directory
+train_data  : absolute path to (torch) training data directory
+dev_data    : absolute path to (torch) validation data directory
+test_data   : absolute path to (torch) test data directory
+dev_ref     : absolute path to kaldi validation data directory, where 'text'
+              and 'stm' files are stored
+test_ref    : absolute path to kaldi test data directory, where 'text' and
+              'stm' files are stored
 weight_file : path to a FloatTensor containing the relative weights of each
               target (only necessary when '--weigh-training-samples true')
 
@@ -142,6 +146,8 @@ data_dir_vars=(
   "train_data"
   "dev_data"
   "test_data"
+  "dev_ref"
+  "test_ref"
 )
 if $weigh_training_samples ; then
   data_dir_vars+=( "weight_file ")
@@ -213,7 +219,8 @@ seed = $(echo "10 * ${trial} + 4" | bc)
 model_cfg='${exp_dir}/${trial_prefix}/model.cfg'
 state_dir='${exp_dir}/${trial_prefix}/states'
 state_csv='${exp_dir}/${trial_prefix}/training.csv'
-scoring_dir='${exp_dir}/${trial_prefix}/scoring'
+decode_dev='${exp_dir}/${trial_prefix}/decode_dev'
+decode_test='${exp_dir}/${trial_prefix}/decode_test'
 weigh_training_samples=${weigh_training_samples}
 decoding_states=${decoding_states}
 " > "${tmp_trial_path}/variables"

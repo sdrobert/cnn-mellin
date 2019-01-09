@@ -138,6 +138,8 @@ log_prior='$(pwd -P)/data/torch/fbank/log_prior.pt'
 train_data='$(pwd -P)/data/torch/fbank/train'
 dev_data='$(pwd -P)/data/torch/fbank/dev'
 test_data='$(pwd -P)/data/torch/fbank/test'
+dev_ref='$(pwd -P)/data/kaldi/fbank/dev'
+test_ref='$(pwd -P)/data/kaldi/fbank/test'
     " > data/torch/fbank/variables
    ```
    The process is the same for any combination of features and alignments
@@ -295,6 +297,7 @@ exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/9
 ```
 
 A given trial can be run with the wrapper script
-_stepsex/train_acoustic_model.sh_. For example,
+_stepsext/train_acoustic_model.sh_. For example,
 `stepsext/train_acoustic_model.sh exp/matrix 1` trains the first trial listed
-in _exp/matrix_.
+in _exp/matrix_. Likewise, _stepsext/decode_acoustic_model.sh_ can be used to
+decode and score a trial.
