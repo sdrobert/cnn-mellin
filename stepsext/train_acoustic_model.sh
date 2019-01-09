@@ -106,5 +106,6 @@ train-acoustic-model \
   --config "${model_cfg}" \
   --device "${device}" \
   --state-csv "${state_csv}" \
+  ${train_num_data_workers:+--train-num-data-workers "${train_num_data_workers}"} \
   ${weight_file:+--weight-tensor-file "${weight_file}"} \
   "${state_dir}" "${train_data}" "${dev_data}"
