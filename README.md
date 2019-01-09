@@ -129,15 +129,15 @@ an acoustic model
     --num-targets ${num_targets} \
     data/torch/fbank/info.ark log_prior data/torch/fbank/log_prior.pt
     echo "\
-freq_dim=${num_targets}
-target_dim=$(awk '$1 == "num_filts" {print $2}' data/torch/fbank/info.ark)
+target_dim=${num_targets}
+freq_dim=$(awk '$1 == "num_filts" {print $2}' data/torch/fbank/info.ark)
 HCLG='$(cd ../s5/exp/tri3/graph; pwd -P)/HCLG.fst'
 gmm_mdl='$(cd ../s5/exp/tri3; pwd -P)/final.mdl'
 weight_file='$(pwd -P)/data/torch/fbank/weights.pt'
 log_prior='$(pwd -P)/data/torch/fbank/log_prior.pt'
-train_data='$(pwd -P)/data/torch/train'
-dev_data='$(pwd -P)/data/torch/dev'
-test_data='$(pwd -P)/data/torch/test'
+train_data='$(pwd -P)/data/torch/fbank/train'
+dev_data='$(pwd -P)/data/torch/fbank/dev'
+test_data='$(pwd -P)/data/torch/fbank/test'
     " > data/torch/fbank/variables
    ```
    The process is the same for any combination of features and alignments
@@ -219,5 +219,82 @@ cnn-mellin/
 ```
 We set up each experimental trial in a subdirectory
 _exp/config_name/trial_number_, which contains a file called _variables_ that
-contains bash variables set to experiment specifics. We can generate this
-matrix using the script _stepsext/generate_matrix.sh_.
+contains bash variables set to experiment specifics. _config_name_ contains a
+hash to ensure that the configuration is unique. We can generate this
+matrix using the script _stepsext/generate_matrix.sh_ (call
+`stepsext/generate_matrix.sh --help` to see the options). This script allows
+one to generate model configurations over the cartesian product of partial
+configurations. For example, we have three partial configurations that are
+mutually exclusive, _conf/partial/conv_1.cfg_:
+``` cfg
+[model]
+num_conv = 1
+mellin = false
+```
+_conf/partial/mconv_ptdtc_1.cfg_:
+``` cfg
+[model]
+mellin = true
+num_conv = 1
+mconv_decimation_strategy = pad-to-dec-time-ceil
+```
+and _conf/partial/mconv_ptdtf_1.cfg_:
+``` cfg
+[model]
+num_conv = 1
+mellin = true
+mconv_decimation_strategy = pad-to-dec-time-floor
+```
+and we have one complementary partial configuration that fixes the number of
+training epochs to 20, _conf/partial/20eps_no_es.cfg_
+``` cfg
+[training]
+num_epochs = 20
+early_stopping_threshold = 0.0
+```
+We can set up a matrix of 10 trials for each combination of partial
+configurations, using fbank features, with the following command:
+``` bash
+stepsext/generate_matrix.sh \
+  data/torch/fbank \
+  conf/partial/conv_1.cfg,conf/partial/mconv_ptdtc_1.cfg,conf/partial/mconv_ptdtf_1.cfg \
+  conf/partial/20eps_no_es.cfg
+```
+which generates 30 trials, listed in _exp/matrix_:
+```
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/1
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/10
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/2
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/3
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/4
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/5
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/6
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/7
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/8
+exp/fbank_conv_1_20eps_no_es_1cbf069a8f/9
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/1
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/10
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/2
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/3
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/4
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/5
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/6
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/7
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/8
+exp/fbank_mconv_ptdtc_1_20eps_no_es_6ea448852b/9
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/1
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/10
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/2
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/3
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/4
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/5
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/6
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/7
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/8
+exp/fbank_mconv_ptdtf_1_20eps_no_es_8161e0f2ca/9
+```
+
+A given trial can be run with the wrapper script
+_stepsex/train_acoustic_model.sh_. For example,
+`stepsext/train_acoustic_model.sh exp/matrix 1` trains the first trial listed
+in _exp/matrix_.

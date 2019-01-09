@@ -17,7 +17,6 @@ function unset_variables() {
 }
 
 [ -f path.sh ] && . path.sh
-[ -f cmd.sh ] && . cmd.sh
 
 weigh_training_samples=false
 exp_dir=exp

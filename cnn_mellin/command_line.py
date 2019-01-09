@@ -8,8 +8,10 @@ import argparse
 import sys
 import os
 import warnings
+import time
 
 from collections import OrderedDict
+from itertools import count as icount
 
 import param
 import pydrobert.param.serialization as serial
@@ -403,9 +405,18 @@ def train_acoustic_model(args=None):
     )
     controller.load_model_and_optimizer_for_epoch(
         model, optimizer, controller.get_last_epoch())
-    for epoch in range(
-            controller.get_last_epoch() + 1,
-            options.config['training'].num_epochs + 1):
+    min_epoch = controller.get_last_epoch() + 1
+    num_epochs = options.config['training'].num_epochs
+    if num_epochs is None:
+        epoch_it = icount(min_epoch)
+        if not options.config['training'].early_stopping_threshold:
+            warnings.warn(
+                'Neither a maximum number of epochs nor an early stopping '
+                'threshold have been set. Training will continue indefinitely')
+    else:
+        epoch_it = range(min_epoch, num_epochs + 1)
+    for epoch in epoch_it:
+        epoch_start = time.time()
         train_loss = running.train_am_for_epoch(
             model,
             train_data,
@@ -421,6 +432,8 @@ def train_acoustic_model(args=None):
             device=options.device,
             weight=weight_tensor
         )
+        print('epoch {:03d} ({:.03f}s): train={:e} val={:e}'.format(
+            epoch, time.time() - epoch_start, train_loss, val_loss))
         if not controller.update_for_epoch(
                 model, optimizer, train_loss, val_loss):
             break
