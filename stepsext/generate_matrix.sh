@@ -23,6 +23,11 @@ exp_dir=exp
 num_trials=10
 decoding_states=best
 append_to_matrix=false
+min_active=200
+max_active=7000
+max_mem=50000000
+beam=13.0
+lattice_beam=8.0
 help_message="Generate an experiment matrix for cnn-mellin
 
 Usage: $0 [options] <torch-data-group> [<config-group-1> [<config-group-2 [...]]]
@@ -78,6 +83,16 @@ Options
                                   will only append the new entries to the
                                   file. If false, the file will be overwritten
                                   (deft: ${append_to_matrix})
+--min-active <INT>              : Used in decoding. The minimum number of
+                                  active states (deft: ${min_active})
+--max-active <INT>              : Used in decoding. The maximum number of
+                                  active states (deft: ${max_active})
+--max-mem <INT>                 : Used in decoding. The maximum approximate
+                                  memory usage in determinization
+                                  (deft: ${max_mem})
+--beam <FLOAT>                  : Decoding beam width (deft: ${beam})
+--lattice-beam <FLOAT>          : Lattice generation beam width
+                                  (deft: ${lattice_beam})
 "
 
 . parse_options.sh
@@ -100,6 +115,11 @@ function get_cfg_dir_name() {
 feat_dir=$1
 weigh_training_samples=${weigh_training_samples}
 decoding_states=${decoding_states}
+min_active=${min_active}
+max_active=${max_active}
+max_mem=${max_mem}
+beam=${beam}
+lattice_beam=${lattice_beam}
 " >> "${tmpf}"
   name="$(basename "$1")"
   shift
@@ -150,7 +170,7 @@ data_dir_vars=(
   "test_ref"
 )
 if $weigh_training_samples ; then
-  data_dir_vars+=( "weight_file ")
+  data_dir_vars+=( "weight_file" )
 fi
 
 tmp_exp_dir="${tmp}/exp"
@@ -170,14 +190,6 @@ Not all variables that were supposed to be set by '${data_dir}/variables' were
 set (call '$0 --help' for more info): ${data_dir_vars[*]}" 1>&2
     exit 1
   fi
-#   if check_variables_are_set "${trial_dir_vars[@]}"; then
-#     echo "\
-# File '${data_dir}/variables' contains one or more of the following variables
-# (are you sure '${data_dir}' is a data directory and not a trials directory?):
-# ${trial_dir_vars[*]}
-# " 1>&2
-#     exit 1
-#   fi
   feat_cfg="${tmp}/fcfg"
   echo "\
 [model]
@@ -223,6 +235,11 @@ decode_dev='${exp_dir}/${trial_prefix}/decode_dev'
 decode_test='${exp_dir}/${trial_prefix}/decode_test'
 weigh_training_samples=${weigh_training_samples}
 decoding_states=${decoding_states}
+min_active=${min_active}
+max_active=${max_active}
+max_mem=${max_mem}
+beam=${beam}
+lattice_beam=${lattice_beam}
 " > "${tmp_trial_path}/variables"
       cat "${data_dir}/variables" >> "${tmp_trial_path}/variables"
       echo "${trial_prefix}" >> "${tmp_exp_dir}/prefixes"

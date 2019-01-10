@@ -85,6 +85,11 @@ trial_dir_vars=(
   "decode_test"
   "weigh_training_samples"
   "decoding_states"
+  "min_active"
+  "max_active"
+  "max_mem"
+  "beam"
+  "lattice_beam"
 )
 unset_variables "${trial_dir_vars[@]}" weight_file
 . "${trial_dir}/variables"

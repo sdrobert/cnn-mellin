@@ -81,6 +81,11 @@ trial_dir_vars=(
   "decode_test"
   "weigh_training_samples"
   "decoding_states"
+  "min_active"
+  "max_active"
+  "max_mem"
+  "beam"
+  "lattice_beam"
 )
 unset_variables "${trial_dir_vars[@]}"
 . "${trial_dir}/variables"
@@ -119,8 +124,15 @@ for x in dev test; do
   if [ -f "${graph_dir}/words.txt" ]; then
     words="${graph_dir}/words.txt"
   fi
+  # acoustic-scale is 1 because we re-scale in scoring
   latgen-faster-mapped \
     ${words:+"--word-symbol-table=${words}"} \
+    --acoustic-scale=1.0 \
+    "--min-active=${min_active}" \
+    "--max-active=${max_active}" \
+    "--max-mem=${max_mem}" \
+    "--beam=${beam}" \
+    "--lattice-beam=${lattice_beam}" \
     --allow-partial=true \
     "${gmm_mdl}" "${HCLG}" "scp:${pdfs_dir}/pdfs.scp" \
     "ark:|gzip -c > ${decode_dir}/lat.1.gz"
