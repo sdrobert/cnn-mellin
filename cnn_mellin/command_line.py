@@ -8,7 +8,6 @@ import argparse
 import sys
 import os
 import warnings
-import time
 
 from collections import OrderedDict
 from itertools import count as icount
@@ -29,29 +28,37 @@ __copyright__ = "Copyright 2018 Sean Robertson"
 
 
 def _construct_default_param_dict():
-    class TrainingParams(
-            running.TrainingEpochParams, training.TrainingStateParams):
-        optimizer = param.ObjectSelector(
-            torch.optim.Adam, objects={
-                'adam': torch.optim.Adam,
-                'adadelta': torch.optim.Adadelta,
-                'adagrad': torch.optim.Adagrad,
-                'sgd': torch.optim.SGD,
-            },
-            doc='The optimizer to train with'
-        )
-        weight_decay = param.Number(
-            0, bounds=(0, None),
-            doc='The L2 penalty to apply to weights'
-        )
-    return OrderedDict((
+    dict_ = OrderedDict((
         ('model', models.AcousticModelParams(name='model')),
-        ('training', TrainingParams(name='training')),
+        ('training', running.TrainingParams(name='training')),
         ('data', data.ContextWindowDataParams(name='data')),
         ('train_data', data.DataSetParams(name='train_data')),
         ('val_data', data.DataSetParams(name='val_data')),
         ('pdfs_data', data.DataSetParams(name='pdfs_data')),
     ))
+    try:
+        from cnn_mellin.optim import CNNMellinOptimParams
+        dict_['optim'] = CNNMellinOptimParams(name='optim')
+    except ImportError as e:  # gpyopt missing
+        pass
+    return dict_
+
+
+class CommaSerializer(serial.DefaultListSelectorSerializer):
+    def help_string(self, name, parameterized):
+        choices_help_string = super(CommaSerializer, self).help_string(
+            name, parameterized)
+        return 'Elements separated by commas. ' + choices_help_string
+
+    def serialize(self, name, parameterized):
+        val = super(CommaSerializer, self).serialize(name, parameterized)
+        return ','.join(str(x) for x in val)
+
+
+class CommaDeserializer(serial.DefaultListSelectorDeserializer):
+    def deserialize(self, name, block, parameterized):
+        block = block.split(',')
+        super(CommaDeserializer, self).deserialize(name, block, parameterized)
 
 
 def _print_parameters_as_ini_parse_args(args):
@@ -85,9 +92,14 @@ def print_parameters_as_ini(args=None):
         return ex.code
     param_dict = _construct_default_param_dict()
     for in_config in options.in_configs:
-        serial.deserialize_from_ini(in_config, param_dict)
+        serial.deserialize_from_ini(
+            in_config, param_dict,
+            deserializer_name_dict={
+                'optim': {'to_optimize': CommaDeserializer()}})
     serial.serialize_to_ini(
-        sys.stdout, param_dict, include_help=options.add_help_string)
+        sys.stdout, param_dict,
+        serializer_name_dict={'optim': {'to_optimize': CommaSerializer()}},
+        include_help=options.add_help_string)
     return 0
 
 
@@ -360,11 +372,6 @@ def train_acoustic_model(args=None):
         options = _train_acoustic_model_parse_args(args)
     except SystemExit as ex:
         return ex.code
-    model = models.AcousticModel(
-        options.config['model'],
-        1 + options.config['data'].context_left +
-        options.config['data'].context_right,
-    )
     if options.weight_tensor_file is not None:
         weight_tensor = torch.load(
             options.weight_tensor_file,
@@ -372,69 +379,31 @@ def train_acoustic_model(args=None):
         )
     else:
         weight_tensor = None
-    train_data = data.ContextWindowTrainingDataLoader(
-        options.train_dir,
-        data.ContextWindowDataSetParams(
-            name='train_data_set',
-            **param.param_union(
-                options.config['data'],
-                options.config['train_data'],
-            )
-        ),
-        pin_memory=(options.device.type == 'cuda'),
-        num_workers=options.train_num_data_workers,
+    train_params = data.ContextWindowDataSetParams(
+        name='train_data_set',
+        **param.param_union(
+            options.config['data'],
+            options.config['train_data'],
+        )
     )
-    val_data = data.ContextWindowEvaluationDataLoader(
-        options.val_dir,
-        data.ContextWindowDataSetParams(
-            name='val_data_set',
-            **param.param_union(
-                options.config['data'],
-                options.config['val_data'],
-            )
-        ),
+    val_params = data.ContextWindowDataSetParams(
+        name='val_data_set',
+        **param.param_union(
+            options.config['data'],
+            options.config['train_data'],
+        )
     )
-    controller = training.TrainingStateController(
+    running.train_am(
+        options.config['model'],
         options.config['training'],
-        state_csv_path=options.state_csv,
-        state_dir=options.state_dir
+        options.train_dir,
+        train_params,
+        options.val_dir,
+        val_params,
+        state_dir=options.state_dir,
+        state_csv=options.state_csv,
+        weight=weight_tensor,
+        device=options.device,
+        train_num_data_workers=options.train_num_data_workers,
     )
-    optimizer = options.config['training'].optimizer(
-        model.parameters(),
-        weight_decay=options.config['training'].weight_decay,
-    )
-    controller.load_model_and_optimizer_for_epoch(
-        model, optimizer, controller.get_last_epoch())
-    min_epoch = controller.get_last_epoch() + 1
-    num_epochs = options.config['training'].num_epochs
-    if num_epochs is None:
-        epoch_it = icount(min_epoch)
-        if not options.config['training'].early_stopping_threshold:
-            warnings.warn(
-                'Neither a maximum number of epochs nor an early stopping '
-                'threshold have been set. Training will continue indefinitely')
-    else:
-        epoch_it = range(min_epoch, num_epochs + 1)
-    for epoch in epoch_it:
-        epoch_start = time.time()
-        train_loss = running.train_am_for_epoch(
-            model,
-            train_data,
-            optimizer,
-            options.config['training'],
-            epoch=epoch,
-            device=options.device,
-            weight=weight_tensor
-        )
-        val_loss = running.get_am_alignment_cross_entropy(
-            model,
-            val_data,
-            device=options.device,
-            weight=weight_tensor
-        )
-        print('epoch {:03d} ({:.03f}s): train={:e} val={:e}'.format(
-            epoch, time.time() - epoch_start, train_loss, val_loss))
-        if not controller.update_for_epoch(
-                model, optimizer, train_loss, val_loss):
-            break
     return 0

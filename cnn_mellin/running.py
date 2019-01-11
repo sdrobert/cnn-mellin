@@ -4,9 +4,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+import time
+import warnings
+
 import torch
 import param
 import pydrobert.torch.training as training
+import pydrobert.torch.data as data
+import cnn_mellin.models as models
 
 from pydrobert.torch.util import optimizer_to
 
@@ -158,3 +164,129 @@ def train_am_for_epoch(
         epoch_loss += loss.item()
         total_batches += 1
     return epoch_loss / total_batches
+
+
+class TrainingParams(TrainingEpochParams, training.TrainingStateParams):
+    optimizer = param.ObjectSelector(
+        torch.optim.Adam, objects={
+            'adam': torch.optim.Adam,
+            'adadelta': torch.optim.Adadelta,
+            'adagrad': torch.optim.Adagrad,
+            'sgd': torch.optim.SGD,
+        },
+        doc='The optimizer to train with'
+    )
+    weight_decay = param.Number(
+        0, bounds=(0, None),
+        doc='The L2 penalty to apply to weights'
+    )
+
+
+def train_am(
+        model_params, training_params, train_dir, train_params, val_dir,
+        val_params, state_dir=None, state_csv=None, weight=None, device='cpu',
+        train_num_data_workers=os.cpu_count() - 1, print_epochs=True):
+    '''Train an acoustic model for multiple epochs
+
+    Parameters
+    ----------
+    model_params : AcousticModelParams
+        Parameters used to configure the model
+    training_params : TrainingParams
+        Parameters used to configure the training process
+    train_dir : str
+        The path to the training data directory
+    train_params : pydrobert.data.ContextWindowDataSetParams
+        Parameters describing the training data
+    val_dir : str
+        The path to the validation data directory
+    val_params : pydrobert.data.ContextWindowDataSetParams
+        Parameters describing the validation data
+    state_dir : str, optional
+        If set, model and optimizer states will be stored in this directory
+    state_csv : str, optional
+        If set, training history will be read and written from this file.
+        Training will resume from the last epoch, if applicable.
+    weight : FloatTensor, optional
+        If set, training and validation loss will be weighed according to this
+        vector, which shares a length with the number of targets
+    train_num_data_workers: int, optional
+        The number of worker threads to spawn to serve training data. 0 means
+        data are served on the main thread. The default is one fewer than the
+        number of CPUs available
+    print_epochs : bool, optional
+        Print the results of each epoch, and their timings, to stdout
+
+    Returns
+    -------
+    model : AcousticModel
+        The trained model
+    '''
+    if train_params.context_left != val_params.context_right:
+        raise ValueError(
+            'context_left does not match for train_params and val_params')
+    if train_params.context_right != val_params.context_right:
+        raise ValueError(
+            'context_right does not match for train_params and val_params')
+    if weight is not None and len(weight) != model_params.target_dim:
+        raise ValueError(
+            'weight tensor does not match model_params.target_dim')
+    model = models.AcousticModel(
+        model_params,
+        1 + train_params.context_left + train_params.context_right,
+    )
+    optimizer = training_params.optimizer(
+        model.parameters(),
+        weight_decay=training_params.weight_decay,
+    )
+    device = torch.device(device)
+    train_data = data.ContextWindowTrainingDataLoader(
+        train_dir, train_params,
+        pin_memory=(device.type == 'cuda'),
+        num_workers=train_num_data_workers,
+    )
+    val_data = data.ContextWindowEvaluationDataLoader(
+        val_dir, val_params,
+        pin_memory=(device.type == 'cuda'),
+    )
+    controller = training.TrainingStateController(
+        training_params,
+        state_csv_path=state_csv,
+        state_dir=state_dir,
+    )
+    controller.load_model_and_optimizer_for_epoch(
+        model, optimizer, controller.get_last_epoch())
+    min_epoch = controller.get_last_epoch() + 1
+    num_epochs = training_params.num_epochs
+    if num_epochs is None:
+        epoch_it = icount(min_epoch)
+        if not training_params.early_stopping_threshold:
+            warnings.warn(
+                'Neither a maximum number of epochs nor an early stopping '
+                'threshold have been set. Training will continue indefinitely')
+    else:
+        epoch_it = range(min_epoch, num_epochs + 1)
+    for epoch in epoch_it:
+        epoch_start = time.time()
+        train_loss = train_am_for_epoch(
+            model,
+            train_data,
+            optimizer,
+            training_params,
+            epoch=epoch,
+            device=device,
+            weight=weight
+        )
+        val_loss = get_am_alignment_cross_entropy(
+            model,
+            val_data,
+            device=device,
+            weight=weight
+        )
+        if print_epochs:
+            print('epoch {:03d} ({:.03f}s): train={:e} val={:e}'.format(
+                epoch, time.time() - epoch_start, train_loss, val_loss))
+        if not controller.update_for_epoch(
+                model, optimizer, train_loss, val_loss):
+            break
+    return model
