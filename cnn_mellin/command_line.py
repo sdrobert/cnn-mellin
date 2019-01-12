@@ -31,7 +31,10 @@ def _construct_default_param_dict():
     dict_ = OrderedDict((
         ('model', models.AcousticModelParams(name='model')),
         ('training', running.TrainingParams(name='training')),
-        ('data', data.ContextWindowDataSetParams(name='data')),
+        ('data', data.ContextWindowDataParams(name='data')),
+        ('train_data', data.DataSetParams(name='train_data')),
+        ('val_data', data.DataSetParams(name='val_data')),
+        ('pdfs_data', data.DataSetParams(name='pdfs_data')),
     ))
     try:
         from cnn_mellin.optim import CNNMellinOptimParams
@@ -299,7 +302,14 @@ def acoustic_model_forward_pdfs(args=None):
         del state_dict
     log_prior = torch.load(options.log_prior_file, map_location=options.device)
     pdfs_data = data.ContextWindowEvaluationDataLoader(
-        options.data_dir, options.config['data'],
+        options.data_dir,
+        data.ContextWindowDataSetParams(
+            name='pdfs_data_set',
+            **param.param_union(
+                options.config['data'],
+                options.config['pdfs_data'],
+            )
+        ),
     )
     running.write_am_pdfs(
         model,
@@ -352,9 +362,7 @@ def _train_acoustic_model_parse_args(args):
         help='Path to where model and optimizer states are stored'
     )
     parser.add_argument('train_dir', help='Path to training data')
-    parser.add_argument(
-        'val_dir', nargs='?', default=None,
-        help='Path to validation data. If unset, will use training set')
+    parser.add_argument('val_dir', help='Path to evaluation data')
     return parser.parse_args(args)
 
 
@@ -371,12 +379,27 @@ def train_acoustic_model(args=None):
         )
     else:
         weight_tensor = None
+    train_params = data.ContextWindowDataSetParams(
+        name='train_data_set',
+        **param.param_union(
+            options.config['data'],
+            options.config['train_data'],
+        )
+    )
+    val_params = data.ContextWindowDataSetParams(
+        name='val_data_set',
+        **param.param_union(
+            options.config['data'],
+            options.config['train_data'],
+        )
+    )
     running.train_am(
         options.config['model'],
         options.config['training'],
-        options.config['data'],
         options.train_dir,
-        val_dir=options.val_dir,
+        train_params,
+        options.val_dir,
+        val_params,
         state_dir=options.state_dir,
         state_csv=options.state_csv,
         weight=weight_tensor,

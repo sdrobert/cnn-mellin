@@ -183,8 +183,8 @@ class TrainingParams(TrainingEpochParams, training.TrainingStateParams):
 
 
 def train_am(
-        model_params, training_params, data_params, train_dir, val_dir=None,
-        state_dir=None, state_csv=None, weight=None, device='cpu',
+        model_params, training_params, train_dir, train_params, val_dir,
+        val_params, state_dir=None, state_csv=None, weight=None, device='cpu',
         train_num_data_workers=os.cpu_count() - 1, print_epochs=True):
     '''Train an acoustic model for multiple epochs
 
@@ -194,13 +194,14 @@ def train_am(
         Parameters used to configure the model
     training_params : TrainingParams
         Parameters used to configure the training process
-    data_params : pydrobert.data.ContextWindowDataSetParams
-        Parameters describing the training (and validation) data set(s)
     train_dir : str
         The path to the training data directory
-    val_dir : str, optional
-        The path to the validation data directory. If unset validation
-        loss equals training loss
+    train_params : pydrobert.data.ContextWindowDataSetParams
+        Parameters describing the training data
+    val_dir : str
+        The path to the validation data directory
+    val_params : pydrobert.data.ContextWindowDataSetParams
+        Parameters describing the validation data
     state_dir : str, optional
         If set, model and optimizer states will be stored in this directory
     state_csv : str, optional
@@ -221,12 +222,18 @@ def train_am(
     model : AcousticModel
         The trained model
     '''
+    if train_params.context_left != val_params.context_right:
+        raise ValueError(
+            'context_left does not match for train_params and val_params')
+    if train_params.context_right != val_params.context_right:
+        raise ValueError(
+            'context_right does not match for train_params and val_params')
     if weight is not None and len(weight) != model_params.target_dim:
         raise ValueError(
             'weight tensor does not match model_params.target_dim')
     model = models.AcousticModel(
         model_params,
-        1 + data_params.context_left + data_params.context_right,
+        1 + train_params.context_left + train_params.context_right,
     )
     optimizer = training_params.optimizer(
         model.parameters(),
@@ -234,17 +241,14 @@ def train_am(
     )
     device = torch.device(device)
     train_data = data.ContextWindowTrainingDataLoader(
-        train_dir, data_params,
+        train_dir, train_params,
         pin_memory=(device.type == 'cuda'),
         num_workers=train_num_data_workers,
     )
-    if val_dir:
-        val_data = data.ContextWindowEvaluationDataLoader(
-            val_dir, data_params,
-            pin_memory=(device.type == 'cuda'),
-        )
-    else:
-        val_data = None
+    val_data = data.ContextWindowEvaluationDataLoader(
+        val_dir, val_params,
+        pin_memory=(device.type == 'cuda'),
+    )
     controller = training.TrainingStateController(
         training_params,
         state_csv_path=state_csv,
@@ -273,15 +277,12 @@ def train_am(
             device=device,
             weight=weight
         )
-        if val_dir:
-            val_loss = get_am_alignment_cross_entropy(
-                model,
-                val_data,
-                device=device,
-                weight=weight
-            )
-        else:
-            val_loss = train_loss
+        val_loss = get_am_alignment_cross_entropy(
+            model,
+            val_data,
+            device=device,
+            weight=weight
+        )
         if print_epochs:
             print('epoch {:03d} ({:.03f}s): train={:e} val={:e}'.format(
                 epoch, time.time() - epoch_start, train_loss, val_loss))

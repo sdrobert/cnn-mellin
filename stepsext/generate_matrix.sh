@@ -214,8 +214,14 @@ seed = $(echo "10 * ${trial}" | bc)
 [training]
 seed = $(echo "10 * ${trial} + 1" | bc)
 
-[data]
+[train_data]
 seed = $(echo "10 * ${trial} + 2" | bc)
+
+[val_data]
+seed = $(echo "10 * ${trial} + 3" | bc)
+
+[pdfs_data]
+seed = $(echo "10 * ${trial} + 4" | bc)
 " > "${trial_cfg}"
       mkdir -p "${tmp_trial_path}"
       print-parameters-as-ini \
