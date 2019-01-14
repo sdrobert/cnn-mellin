@@ -94,12 +94,13 @@ def print_parameters_as_ini(args=None):
     for in_config in options.in_configs:
         serial.deserialize_from_ini(
             in_config, param_dict,
-            deserializer_name_dict={
-                'optim': {'to_optimize': CommaDeserializer()}})
+            deserializer_type_dict={param.ListSelector: CommaDeserializer()},
+        )
     serial.serialize_to_ini(
         sys.stdout, param_dict,
-        serializer_name_dict={'optim': {'to_optimize': CommaSerializer()}},
-        include_help=options.add_help_string)
+        serializer_type_dict={param.ListSelector: CommaSerializer()},
+        include_help=options.add_help_string
+    )
     return 0
 
 
@@ -211,6 +212,7 @@ def _acoustic_model_forward_pdfs_parse_args(args):
         action=pargparse.ParameterizedIniReadAction,
         help='Read in a INI (config) file for settings',
         parameterized=param_dict,
+        deserializer_type_dict={param.ListSelector: CommaDeserializer()},
     )
     parser.add_argument(
         '--device',
@@ -331,6 +333,7 @@ def _train_acoustic_model_parse_args(args):
         action=pargparse.ParameterizedIniReadAction,
         help='Read in a INI (config) file for settings',
         parameterized=param_dict,
+        deserializer_type_dict={param.ListSelector: CommaDeserializer()},
     )
     parser.add_argument(
         '--device',
