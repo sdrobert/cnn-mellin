@@ -26,7 +26,9 @@ if {'pytest', 'test', 'ptr'}.intersection(sys.argv):
     SETUP_REQUIRES += ['pytest-runner', 'pytest']
 
 INSTALL_REQUIRES = [
-    'pydrobert-pytorch', 'pydrobert-gpyopt'
+    'pydrobert-pytorch',
+    'pydrobert-param',
+    'pydrobert-mellin',
 ]
 try:
     import torch
@@ -73,5 +75,6 @@ if __name__ == '__main__':
                 'target-count-info-to-tensor = cnn_mellin.command_line:'
                 'target_count_info_to_tensor'
             ]
-        }
+        },
+        tests_require=['pydrobert-gpyopt'],
     )

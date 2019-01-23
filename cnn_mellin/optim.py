@@ -9,6 +9,7 @@ import pydrobert.gpyopt as gpyopt
 import pydrobert.torch.data as data
 import numpy as np
 import cnn_mellin.models as models
+import cnn_mellin.running as running
 
 __author__ = "Sean Robertson"
 __email__ = "sdrobert@cs.toronto.edu"
@@ -52,6 +53,7 @@ OPTIM_DICT = {
     'context_left': ('data_set', 'discrete', (0, 5)),
     'context_right': ('data_set', 'discrete', (0, 5)),
     'batch_size': ('data_set', 'discrete', (1, 20)),
+    'reverse': ('data_set', 'categorical', (True, False)),
     'weigh_training_samples': (None, 'categorical', (True, False)),
 }
 
@@ -146,6 +148,7 @@ def optimize_am(
             new_partitions.append(utt_ids[:partition_size])
             utt_ids = utt_ids[partition_size:]
         new_partitions.append(utt_ids)
+        partitions = new_partitions
     num_partitions = len(partitions)
     if num_partitions < 2 + (1 if val_partition else 0):
         raise ValueError('Too few partitions')
@@ -160,9 +163,9 @@ def optimize_am(
     partitions_to_average = 1
     eval_idx = [num_partitions - 1]
     model_param_dict = param.param_union(base_model_params)
-    training_param_dict = params.param_union(base_training_params)
+    training_param_dict = param.param_union(base_training_params)
     data_param_dict = dict(
-        (k, v) for (k, v) in param.param_union(optim_params)
+        (k, v) for (k, v) in param.param_union(optim_params).items()
         if k in set(data.DataSetParams().param.params().keys())
     )
     data_param_dict.update(param.param_union(base_data_params))
@@ -180,14 +183,14 @@ def optimize_am(
         model_params = models.AcousticModelParams(**model_param_dict)
         training_params = running.TrainingParams(**training_param_dict)
         train_params = data.ContextWindowDataSetParams(**data_param_dict)
-        val_params = data.ContextWindowDataParams(**data_param_dict)
-        eval_params = data.ContextWindowDataParams(**data_param_dict)
+        val_params = data.ContextWindowDataSetParams(**data_param_dict)
+        eval_params = data.ContextWindowDataSetParams(**data_param_dict)
         my_weight = weight
         for key, value in kwargs.items():
             if key == 'weigh_training_samples' and not value:
                 my_weight = None
                 continue
-            params_name = OPTIM_DICT[key][1]
+            params_name = OPTIM_DICT[key][0]
             if params_name == 'model':
                 model_params.param.set_param(**{key: value})
             elif params_name == 'training':
@@ -217,7 +220,7 @@ def optimize_am(
             eval_params.subset_ids = list(eval_subset_ids)
             model = running.train_am(
                 model_params, training_params, data_dir, train_params,
-                data_dir, weight=weight, device=device,
+                data_dir, val_params, weight=weight, device=device,
                 train_num_data_workers=train_num_data_workers,
                 print_epochs=False
             )
@@ -229,18 +232,18 @@ def optimize_am(
         return np.mean(objectives)
     wrapped = gpyopt.GPyOptObjectiveWrapper(objective)
     for param_name in optim_params.to_optimize:
-        param_type, param_constr = OPTIM_SET[param_name][1:]
+        param_type, param_constr = OPTIM_DICT[param_name][1:]
         wrapped.set_variable_parameter(param_name, param_type, param_constr)
     best = gpyopt.bayesopt(wrapped, optim_params, history_csv)
     model_params = models.AcousticModelParams(**model_param_dict)
     training_params = running.TrainingParams(**training_param_dict)
     data_params = data.ContextWindowDataSetParams(**data_param_dict)
     weigh_training_samples = None
-    for key, value in kwargs.items():
+    for key, value in best.items():
         if key == 'weigh_training_samples':
             weigh_training_samples = value
             continue
-        params_name = OPTIM_DICT[key][1]
+        params_name = OPTIM_DICT[key][0]
         if params_name == 'model':
             model_params.param.set_param(**{key: value})
         elif params_name == 'training':
