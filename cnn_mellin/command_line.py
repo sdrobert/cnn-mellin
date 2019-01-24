@@ -411,3 +411,137 @@ def train_acoustic_model(args=None):
         train_num_data_workers=options.train_num_data_workers,
     )
     return 0
+
+
+def _optimize_acoutic_model_parse_args(args):
+    parser = argparse.ArgumentParser(
+        description=optimize_acoustic_model.__doc__
+    )
+    param_dict = _construct_default_param_dict()
+    parser.add_argument(
+        '--config',
+        action=pargparse.ParameterizedIniReadAction,
+        help='Read in a INI (config) file for settings',
+        parameterized=param_dict,
+        deserializer_type_dict={param.ListSelector: CommaDeserializer()},
+    )
+    parser.add_argument(
+        '--device',
+        type=torch.device,
+        default=torch.device('cuda'),
+        help='The torch device to run training on'
+    )
+    parser.add_argument(
+        '--train-num-data-workers',
+        type=int,
+        default=os.cpu_count() - 1,
+        help='The number of subprocesses to spawn to serve training data. 0 '
+        'means data are served on the main thread. The default is one fewer '
+        'than the number of CPUs available'
+    )
+    parser.add_argument(
+        '--weight-tensor-file', type=argparse.FileType('rb'), default=None,
+        help='Path to a stored tensor containing class weights. If unset, '
+        'training will be uniform.'
+    )
+    parser.add_argument(
+        '--no-val-partition', dest='val_partition', action='store_false',
+        default=True,
+        help='If this flag is set, no validation partition will be used for '
+        'lr decay, early stopping, etc. Instead, test data will be evaluated'
+    )
+    parser.add_argument(
+        '--history-csv', default=None,
+        help='Where to store intermediate results of the optimization'
+    )
+    parser.add_argument(
+        '--add-help-string', action='store_true', default=False,
+        help='If set, will include parameter help strings at the start of the '
+        'printout'
+    )
+    parser.add_argument(
+        '--data-set-config-section',
+        choices=['train_data', 'val_data', 'pdfs_data'], default='train_data',
+        help='What section of the configuration to combine with [data] to '
+        'make a data set configuration. This section will dictate, for '
+        'example, the base batch_size and the subset_ids that the '
+        'optimization will be restricted to. Optimized settings will be '
+        'written back to this section'
+    )
+    parser.add_argument('data_dir', help='Path to optimization data')
+    parser.add_argument(
+        'partitions', nargs='+',
+        help='Either an integer that will be used to dynamically partition '
+        '`data_dir` into that many partitions (usually must be >3, but >2 if '
+        '--no-val-partition), or some number of files (> 3) containing '
+        'utterance ids, one per line, of each partition'
+    )
+    parser.add_argument(
+        'out_ini', type=argparse.FileType('w'),
+        help='Path to write the optimize config (INI) file to'
+    )
+    return parser.parse_args(args)
+
+
+def optimize_acoustic_model(args=None):
+    '''Optimize an acoustic model from cnn-mellin'''
+    try:
+        options = _optimize_acoutic_model_parse_args(args)
+    except SystemExit as ex:
+        return ex.code
+    if options.weight_tensor_file is not None:
+        weight_tensor = torch.load(
+            options.weight_tensor_file,
+            map_location=options.device,
+        )
+    else:
+        weight_tensor = None
+    try:
+        if len(options.partitions) == 1:
+            partitions = int(options.partitions[0])
+        else:
+            partitions = tuple(
+                tuple(x.strip() for x in open(f))
+                for f in options.partitions
+            )
+    except ValueError:
+        print(
+            'partitions must be an integer or sequence of file names',
+            file=sys.stderr
+        )
+        return 1
+    import cnn_mellin.optim as optim
+    data_set_params = data.ContextWindowDataSetParams(
+        name='data_set',
+        **param.param_union(
+            options.config['data'],
+            options.config[options.data_set_config_section],
+        )
+    )
+    model_params, training_params, data_set_params = optim.optimize_am(
+        options.data_dir, partitions, options.config['optim'],
+        options.config['model'], options.config['training'],
+        data_set_params,
+        val_partition=options.val_partition,
+        weight=weight_tensor,
+        device=options.device,
+        train_num_data_workers=options.train_num_data_workers,
+        history_csv=options.history_csv,
+    )
+    # only set the values that could have been optimized. This avoids weirdness
+    # like setting the partition for individual data sets
+    for config_params, optimized_params in (
+            (options.config['model'], model_params),
+            (options.config['data'], data_set_params),
+            (options.config[options.data_set_config_section], data_set_params),
+            (options.config['training'], training_params)):
+        for param_name in config_params.param.params().keys():
+            if param_name in optim.OPTIM_DICT:
+                config_params.param.set_param(
+                    **{param_name: getattr(optimized_params, param_name)})
+    serial.serialize_to_ini(
+        options.out_ini, options.config,
+        serializer_type_dict={param.ListSelector: CommaSerializer()},
+        include_help=options.add_help_string
+    )
+    return 0

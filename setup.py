@@ -73,7 +73,9 @@ if __name__ == '__main__':
                 'acoustic-model-forward-pdfs = cnn_mellin.command_line:'
                 'acoustic_model_forward_pdfs',
                 'target-count-info-to-tensor = cnn_mellin.command_line:'
-                'target_count_info_to_tensor'
+                'target_count_info_to_tensor',
+                'optimize-acoustic-model = cnn_mellin.command_line:'
+                'optimize_acoustic_model',
             ]
         },
         tests_require=['pydrobert-gpyopt'],

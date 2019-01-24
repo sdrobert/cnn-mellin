@@ -298,3 +298,75 @@ def test_train_acoustic_model(temp_dir, populate_torch_dir):
     for key in params_a.keys():
         assert torch.allclose(params_a[key], params_b[key], atol=1e-4)
     assert os.path.isfile(os.path.join(state_dir, 'foo-2.pt'))
+
+
+@pytest.mark.gpu
+def test_optimize_acoustic_model(temp_dir, populate_torch_dir):
+    data_dir = os.path.join(temp_dir, 'data')
+    in_ini = os.path.join(temp_dir, 'in.ini')
+    out_ini = os.path.join(temp_dir, 'out.ini')
+    history_csv = os.path.join(temp_dir, 'history.csv')
+    utt_ids = sorted(populate_torch_dir(data_dir, 20, num_filts=3)[-1])
+    with open(in_ini, 'w') as f:
+        f.write(
+            '[model]\n'
+            'freq_dim = 3\n'
+            'target_dim = 11\n'
+            'num_fc = 1\n'
+            'num_conv = 0\n'
+            '[data]\n'
+            'context_left = 0\n'
+            'context_right = 0\n'
+            '[training]\n'
+            'num_epochs = 5\n'
+            'log10_learning_rate = -300\n'
+            '[train_data]\n'
+            'batch_size = 100\n'
+            '[optim]\n'
+            'to_optimize = log10_learning_rate,batch_size\n'
+            'max_samples = 5\n'
+        )
+    partitions = [
+        os.path.join(temp_dir, x)
+        for x in ('p1.txt', 'p2.txt', 'p3.txt')
+    ]
+    partition_size = len(utt_ids) // 4
+    for partition in partitions:
+        with open(partition, 'w') as f:
+            f.write('\n'.join(utt_ids[:partition_size]))
+        utt_ids = utt_ids[partition_size:]
+    assert not command_line.optimize_acoustic_model([
+        '--config', in_ini,
+        '--device', 'cpu',
+        '--history-csv', history_csv,
+        data_dir,
+        str(len(partitions)),
+        out_ini
+    ])
+    with open(out_ini) as f:
+        lines = f.read()
+    train_data_idx = lines.index('[train_data]')
+    batch_size_idx = lines.index('batch_size', train_data_idx)
+    batch_line = lines[batch_size_idx:].split('\n')[0]
+    batch_size = int(batch_line.split('=')[1].strip())
+    assert batch_size != 30
+    log10_lr_idx = lines.index('log10_learning_rate')
+    log10_lr_line = lines[log10_lr_idx:].split('\n')[0]
+    log10_lr = int(log10_lr_line.split('=')[1].strip())
+    assert log10_lr != -300
+    found_batch_size, found_lr = False, False
+    with open(history_csv) as f:
+        for line_no, line in enumerate(f):
+            line = line.strip().split(',')
+            if not line_no:
+                log10_lr_idx = line.index('log10_learning_rate')
+                batch_size_idx = line.index('batch_size')
+            else:
+                cur_log10_lr = int(line[log10_lr_idx])
+                cur_batch_size = int(line[batch_size_idx])
+                found_batch_size |= cur_batch_size == batch_size
+                found_lr |= cur_log10_lr == log10_lr
+    assert not command_line.optimize_acoustic_model([
+        '--config', in_ini,
+        '--device', 'cuda',
+        data_dir] + partitions + [out_ini])
