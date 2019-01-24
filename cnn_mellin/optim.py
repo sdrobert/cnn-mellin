@@ -58,8 +58,7 @@ OPTIM_DICT = {
 }
 
 
-class CNNMellinOptimParams(
-        data.DataSetParams, gpyopt.BayesianOptimizationParams):
+class CNNMellinOptimParams(gpyopt.BayesianOptimizationParams):
     to_optimize = param.ListSelector(
         [], objects=list(OPTIM_DICT),
         doc='A list of hyperparameters to optimize with a call to '
@@ -77,7 +76,7 @@ class CNNMellinOptimParams(
 
 def optimize_am(
         data_dir, partitions, optim_params, base_model_params,
-        base_training_params, base_data_params, val_partition=False,
+        base_training_params, base_data_set_params, val_partition=False,
         weight=None, device='cpu', train_num_data_workers=os.cpu_count() - 1,
         history_csv=None):
     '''Optimize acoustic model hyperparameters
@@ -102,7 +101,7 @@ def optimize_am(
     base_training_params : cnn_mellin.running.TrainingParams
         Default hyperparameters used in training. The values for any
         hyperparameters that are being optimized will be ignored
-    base_data_params : pydrobert.torch.data.ContextWindowDataParams
+    base_data_set_params : pydrobert.torch.data.ContextWindowDataSetParams
         Default hyperparameters used to load data. The values for any
         hyperparameters that are being optimized will be ignored
     val_partition : bool, optional
@@ -137,8 +136,12 @@ def optimize_am(
     optimization, though those seeds are retained in the returned
     parameters. Seeds are dynamically incremented for each retraining.
     '''
+    subset_ids = set(base_data_set_params.subset_ids)
     if isinstance(partitions, int):
-        utt_ids = list(data.SpectDataSet(data_dir).utt_ids)
+        utt_ids = data.SpectDataSet(data_dir).utt_ids
+        if subset_ids:
+            utt_ids &= subset_ids
+        utt_ids = sorted(utt_ids)
         rng = np.random.RandomState(seed=optim_params.seed)
         rng.shuffle(utt_ids)
         new_partitions = []
@@ -164,11 +167,7 @@ def optimize_am(
     seed = [0]
     model_param_dict = param.param_union(base_model_params)
     training_param_dict = param.param_union(base_training_params)
-    data_param_dict = dict(
-        (k, v) for (k, v) in param.param_union(optim_params).items()
-        if k in set(data.DataSetParams().param.params().keys())
-    )
-    data_param_dict.update(param.param_union(base_data_params))
+    data_param_dict = param.param_union(base_data_set_params)
 
     def to_next(x):
         return (x + 1) % num_partitions
@@ -215,6 +214,10 @@ def optimize_am(
                     if i != eval_idx[0]
                 )))
                 val_subset_ids = train_subset_ids
+            if subset_ids:
+                train_subset_ids &= subset_ids
+                val_subset_ids &= subset_ids
+                eval_subset_ids &= subset_ids
             train_params.subset_ids = list(train_subset_ids)
             val_params.subset_ids = list(val_subset_ids)
             eval_params.subset_ids = list(eval_subset_ids)
@@ -229,7 +232,6 @@ def optimize_am(
             objectives.append(running.get_am_alignment_cross_entropy(
                 model, eval_data, device=device))
             eval_idx[0] = to_next(eval_idx[0])
-        print(seed[0] - 3, training_params.weight_decay, np.mean(objectives))
         return np.mean(objectives)
     wrapped = gpyopt.GPyOptObjectiveWrapper(objective)
     if history_csv:
