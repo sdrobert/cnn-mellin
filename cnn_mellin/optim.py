@@ -50,11 +50,11 @@ OPTIM_DICT = {
     'log10_learning_rate': ('training', 'discrete', (-10, -1)),
     'optimizer':
         ('training', 'categorical', ('adam', 'adadelta', 'adagrad', 'sgd')),
+    'weigh_training_samples': ('training', 'categorical', (True, False)),
     'context_left': ('data_set', 'discrete', (0, 5)),
     'context_right': ('data_set', 'discrete', (0, 5)),
     'batch_size': ('data_set', 'discrete', (1, 20)),
     'reverse': ('data_set', 'categorical', (True, False)),
-    'weigh_training_samples': (None, 'categorical', (True, False)),
 }
 
 
@@ -113,14 +113,9 @@ def optimize_am(
         partition ``(i - 1) % |partitions|`` will be treated as the validation
         partition.
     weight : FloatTensor, optional
-        A weight tensor to be used in the loss function. If
-        ``weigh_training_samples`` is not listed in `optim_params.to_optimize`
-        and `weight` is set, the tensor will be used to weigh samples by
-        their targets. If set and ``weigh_training_samples`` is listed, the
-        tensor will be used to weigh samples when ``weigh_training_samples``
-        is ``True``. If `weight` is not set, the loss function will use
-        uniform weights and ``weigh_training_samples`` will be removed from
-        `optim_params.to_optimize` (if necessary)
+        A weight tensor to be used in the loss function. If unset, but
+        ``weigh_training_samples`` is listed in ``optim_params.to_optimize``,
+        ``weigh_training_samples`` will be removed from ``to_optimize``
     device : torch.device or str, optional
         The device to perform training and evaluation on
     train_num_data_workers : int, optional
@@ -133,10 +128,14 @@ def optimize_am(
 
     Returns
     -------
-    model_params, training_params, data_set_params, bool
-        Upon completion, returns the parameters with the best objective values.
-        The last value is 'weigh_training_samples' if optimized, otherwise
-        None
+    model_params, training_params, data_set_params
+        Upon completion, returns the parameters with the best objective values
+
+    Notes
+    -----
+    This function unsets 'seed' in ``base_*_params`` when performing
+    optimization, though those seeds are retained in the returned
+    parameters. Seeds are dynamically incremented for each retraining.
     '''
     if isinstance(partitions, int):
         utt_ids = list(data.SpectDataSet(data_dir).utt_ids)
@@ -162,6 +161,7 @@ def optimize_am(
         optim_params.to_optimize.remove('weigh_training_samples')
     partitions_to_average = 1
     eval_idx = [num_partitions - 1]
+    seed = [0]
     model_param_dict = param.param_union(base_model_params)
     training_param_dict = param.param_union(base_training_params)
     data_param_dict = dict(
@@ -181,15 +181,15 @@ def optimize_am(
 
     def objective(**kwargs):
         model_params = models.AcousticModelParams(**model_param_dict)
+        model_params.seed = seed[0]
         training_params = running.TrainingParams(**training_param_dict)
+        training_params.seed = seed[0] + 1
         train_params = data.ContextWindowDataSetParams(**data_param_dict)
+        train_params.seed = seed[0] + 2
         val_params = data.ContextWindowDataSetParams(**data_param_dict)
         eval_params = data.ContextWindowDataSetParams(**data_param_dict)
-        my_weight = weight
+        seed[0] += 3
         for key, value in kwargs.items():
-            if key == 'weigh_training_samples' and not value:
-                my_weight = None
-                continue
             params_name = OPTIM_DICT[key][0]
             if params_name == 'model':
                 model_params.param.set_param(**{key: value})
@@ -229,8 +229,18 @@ def optimize_am(
             objectives.append(running.get_am_alignment_cross_entropy(
                 model, eval_data, device=device))
             eval_idx[0] = to_next(eval_idx[0])
+        print(seed[0] - 3, training_params.weight_decay, np.mean(objectives))
         return np.mean(objectives)
     wrapped = gpyopt.GPyOptObjectiveWrapper(objective)
+    if history_csv:
+        try:
+            _, Y = wrapped.read_history_to_X_Y(history_csv)
+            seed[0] = len(Y) * 3
+            for _ in range(len(Y)):
+                for _ in range(partitions_to_average):
+                    eval_idx[0] = to_next(eval_idx[0])
+        except IOError:
+            pass
     for param_name in optim_params.to_optimize:
         param_type, param_constr = OPTIM_DICT[param_name][1:]
         wrapped.set_variable_parameter(param_name, param_type, param_constr)
@@ -240,9 +250,6 @@ def optimize_am(
     data_params = data.ContextWindowDataSetParams(**data_param_dict)
     weigh_training_samples = None
     for key, value in best.items():
-        if key == 'weigh_training_samples':
-            weigh_training_samples = value
-            continue
         params_name = OPTIM_DICT[key][0]
         if params_name == 'model':
             model_params.param.set_param(**{key: value})
@@ -250,4 +257,4 @@ def optimize_am(
             training_params.param.set_param(**{key: value})
         else:
             data_params.param.set_param(**{key: value})
-    return model_params, training_params, data_params, weigh_training_samples
+    return model_params, training_params, data_params

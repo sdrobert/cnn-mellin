@@ -352,7 +352,8 @@ def _train_acoustic_model_parse_args(args):
     parser.add_argument(
         '--weight-tensor-file', type=argparse.FileType('rb'), default=None,
         help='Path to a stored tensor containing class weights. If unset, '
-        'training will be uniform'
+        'training will be uniform. If set, it will only be used if'
+        'weigh_training_samples = True in the [training] configuration.'
     )
     parser.add_argument(
         '--state-csv',

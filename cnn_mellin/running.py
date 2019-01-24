@@ -107,6 +107,12 @@ class TrainingEpochParams(param.Parameterized):
         0.,
         doc='The model dropout probability'
     )
+    weigh_training_samples = param.Boolean(
+        True,
+        doc='If a weight tensor is provided during training and this is '
+        '``True``, per-frame loss will be weighed with the index matching '
+        'the target'
+    )
 
 
 def train_am_for_epoch(
@@ -130,8 +136,9 @@ def train_am_for_epoch(
     device : torch.device or str, optional
         On what device should the model/data be on
     weight : FloatTensor, optional
-        Relative weights to assign to each class. If unset, weights are
-        uniform
+        Relative weights to assign to each class.
+        `params.weigh_training_samples` must also be ``True`` to use during
+        training
 
     Returns
     -------
@@ -146,8 +153,15 @@ def train_am_for_epoch(
         data_loader.epoch = epoch
     model = model.to(device)
     optimizer_to(optimizer, device)
-    if weight is not None:
-        weight = weight.to(device)
+    if params.weigh_training_samples:
+        if weight is None:
+            warnings.warn(
+                '{}.weigh_training_samples is True, but no weight vector was '
+                'passed to train_am_for_epoch'.format(params.name))
+        else:
+            weight = weight.to(device)
+    else:
+        weight = None
     model.train()
     if params.seed is not None:
         torch.manual_seed(params.seed + epoch)
@@ -208,8 +222,9 @@ def train_am(
         If set, training history will be read and written from this file.
         Training will resume from the last epoch, if applicable.
     weight : FloatTensor, optional
-        If set, training and validation loss will be weighed according to this
-        vector, which shares a length with the number of targets
+        Relative weights to assign to each class.
+        `train_params.weigh_training_samples` must also be ``True`` to use
+        during training
     train_num_data_workers: int, optional
         The number of worker threads to spawn to serve training data. 0 means
         data are served on the main thread. The default is one fewer than the
