@@ -79,7 +79,6 @@ trial_dir_vars=(
   "state_csv"
   "decode_dev"
   "decode_test"
-  "weigh_training_samples"
   "decoding_states"
   "min_active"
   "max_active"

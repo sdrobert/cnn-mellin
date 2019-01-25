@@ -18,7 +18,6 @@ function unset_variables() {
 
 [ -f path.sh ] && . path.sh
 
-weigh_training_samples=false
 exp_dir=exp
 num_trials=10
 decoding_states=best
@@ -56,7 +55,7 @@ dev_ref     : absolute path to kaldi validation data directory, where 'text'
 test_ref    : absolute path to kaldi test data directory, where 'text' and
               'stm' files are stored
 weight_file : path to a FloatTensor containing the relative weights of each
-              target (only necessary when '--weigh-training-samples true')
+              target (optional)
 
 <config-group-x> is a comma-delimited list of files containing partial
 configuration files (in .INI format) that are mutually exclusive of one
@@ -66,9 +65,6 @@ the files, one from each group, such that <config-group-x> clobbers
 command line.
 
 Options
---weigh-training-samples <BOOL> : Whether to apply per-target weights to the
-                                  loss function when training
-                                  (deft: ${weigh_training_samples})
 --exp-dir <DIR>                 : Root directory of outputs. A file
                                   'exp_dir/matrix' will list trials and all
                                   trials will be in a subdirectory of exp_dir
@@ -113,7 +109,6 @@ function get_cfg_dir_name() {
   tmpf="${tmp}/a"
   echo "\
 feat_dir=$1
-weigh_training_samples=${weigh_training_samples}
 decoding_states=${decoding_states}
 min_active=${min_active}
 max_active=${max_active}
@@ -169,9 +164,6 @@ data_dir_vars=(
   "dev_ref"
   "test_ref"
 )
-if $weigh_training_samples ; then
-  data_dir_vars+=( "weight_file" )
-fi
 
 tmp_exp_dir="${tmp}/exp"
 mkdir "${tmp_exp_dir}"
@@ -182,7 +174,7 @@ for data_dir in "${data_group[@]}"; do
     exit 1
   fi
 
-  unset_variables "${data_dir_vars[@]}"
+  unset_variables "${data_dir_vars[@]}" "weight_file"
   . "${data_dir}/variables"
   if ! check_variables_are_set "${data_dir_vars[@]}"; then
     echo "\
@@ -223,6 +215,7 @@ seed = $(echo "10 * ${trial} + 3" | bc)
 [pdfs_data]
 seed = $(echo "10 * ${trial} + 4" | bc)
 " > "${trial_cfg}"
+
       mkdir -p "${tmp_trial_path}"
       print-parameters-as-ini \
         "${cfgs[@]}" "${feat_cfg}" "${trial_cfg}" \
@@ -233,7 +226,6 @@ state_dir='${exp_dir}/${trial_prefix}/states'
 state_csv='${exp_dir}/${trial_prefix}/training.csv'
 decode_dev='${exp_dir}/${trial_prefix}/decode_dev'
 decode_test='${exp_dir}/${trial_prefix}/decode_test'
-weigh_training_samples=${weigh_training_samples}
 decoding_states=${decoding_states}
 min_active=${min_active}
 max_active=${max_active}

@@ -83,7 +83,6 @@ trial_dir_vars=(
   "state_csv"
   "decode_dev"
   "decode_test"
-  "weigh_training_samples"
   "decoding_states"
   "min_active"
   "max_active"
@@ -91,15 +90,9 @@ trial_dir_vars=(
   "beam"
   "lattice_beam"
 )
-unset_variables "${trial_dir_vars[@]}" weight_file
+unset_variables "${trial_dir_vars[@]}" "weight_file"
 . "${trial_dir}/variables"
 check_variables_are_set "${trial_dir_vars[@]}"
-if $weigh_training_samples ; then
-  check_variables_are_set weight_file
-else
-  # unset it so we know not to use it
-  weight_file=
-fi
 
 if [ -z "${device}" ]; then
   if python -c 'import sys; import torch; sys.exit(0 if torch.cuda.is_available() else 1)'; then
