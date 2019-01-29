@@ -237,7 +237,7 @@ def train_am(
     model : AcousticModel
         The trained model
     '''
-    if train_params.context_left != val_params.context_right:
+    if train_params.context_left != val_params.context_left:
         raise ValueError(
             'context_left does not match for train_params and val_params')
     if train_params.context_right != val_params.context_right:
@@ -246,6 +246,18 @@ def train_am(
     if weight is not None and len(weight) != model_params.target_dim:
         raise ValueError(
             'weight tensor does not match model_params.target_dim')
+    device = torch.device(device)
+    train_data = data.ContextWindowTrainingDataLoader(
+        train_dir, train_params,
+        pin_memory=(device.type == 'cuda'),
+        num_workers=train_num_data_workers,
+    )
+    assert len(train_data)
+    val_data = data.ContextWindowEvaluationDataLoader(
+        val_dir, val_params,
+        pin_memory=(device.type == 'cuda'),
+    )
+    assert len(val_data)
     model = models.AcousticModel(
         model_params,
         1 + train_params.context_left + train_params.context_right,
@@ -253,16 +265,6 @@ def train_am(
     optimizer = training_params.optimizer(
         model.parameters(),
         weight_decay=training_params.weight_decay,
-    )
-    device = torch.device(device)
-    train_data = data.ContextWindowTrainingDataLoader(
-        train_dir, train_params,
-        pin_memory=(device.type == 'cuda'),
-        num_workers=train_num_data_workers,
-    )
-    val_data = data.ContextWindowEvaluationDataLoader(
-        val_dir, val_params,
-        pin_memory=(device.type == 'cuda'),
     )
     controller = training.TrainingStateController(
         training_params,

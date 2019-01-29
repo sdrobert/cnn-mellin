@@ -27,6 +27,9 @@ max_active=7000
 max_mem=50000000
 beam=13.0
 lattice_beam=8.0
+optim_data_set=train
+optim_num_partitions=3
+optim_use_val_partition=true
 help_message="Generate an experiment matrix for cnn-mellin
 
 Usage: $0 [options] <torch-data-group> [<config-group-1> [<config-group-2 [...]]]
@@ -65,30 +68,41 @@ the files, one from each group, such that <config-group-x> clobbers
 command line.
 
 Options
---exp-dir <DIR>                 : Root directory of outputs. A file
-                                  'exp_dir/matrix' will list trials and all
-                                  trials will be in a subdirectory of exp_dir
-                                  (deft: ${exp_dir})
---num-trials <INT>              : Total number of trials per configuration to
-                                  generate (deft: ${num_trials})
---decoding-states {best,last}   : Whether test-time decoding should use the
-                                  best model parameters or last model
-                                  parameters at test time
-                                  (def: ${decoding_states})
---append-to-matrix <BOOL>       : If a matrix file already exists and true,
-                                  will only append the new entries to the
-                                  file. If false, the file will be overwritten
-                                  (deft: ${append_to_matrix})
---min-active <INT>              : Used in decoding. The minimum number of
-                                  active states (deft: ${min_active})
---max-active <INT>              : Used in decoding. The maximum number of
-                                  active states (deft: ${max_active})
---max-mem <INT>                 : Used in decoding. The maximum approximate
-                                  memory usage in determinization
-                                  (deft: ${max_mem})
---beam <FLOAT>                  : Decoding beam width (deft: ${beam})
---lattice-beam <FLOAT>          : Lattice generation beam width
-                                  (deft: ${lattice_beam})
+--exp-dir <DIR>                   : Root directory of outputs. A file
+                                    'exp_dir/matrix' will list trials and all
+                                    trials will be in a subdirectory of exp_dir
+                                    (deft: ${exp_dir})
+--num-trials <INT>                : Total number of trials per configuration to
+                                    generate (deft: ${num_trials})
+--decoding-states {best,last}     : Whether test-time decoding should use the
+                                    best model parameters or last model
+                                    parameters at test time
+                                    (def: ${decoding_states})
+--append-to-matrix <BOOL>         : If a matrix file already exists and true,
+                                    will only append the new entries to the
+                                    file. If false, the file will be
+                                    overwritten (deft: ${append_to_matrix})
+--min-active <INT>                : Used in decoding. The minimum number of
+                                    active states (deft: ${min_active})
+--max-active <INT>                : Used in decoding. The maximum number of
+                                    active states (deft: ${max_active})
+--max-mem <INT>                   : Used in decoding. The maximum approximate
+                                    memory usage in determinization
+                                    (deft: ${max_mem})
+--beam <FLOAT>                    : Decoding beam width (deft: ${beam})
+--lattice-beam <FLOAT>            : Lattice generation beam width
+                                    (deft: ${lattice_beam})
+--optim-data-set {train,dev,test} : The partition to perform hyperparameter
+                                    optimization on (deft: ${optim_data_set})
+--optim-partitions <INT>          : The number of partitions to split the data
+                                    set for hyperparameter optimization.
+                                    localext/split_torch_data_dir.sh will be
+                                    used for the actual split, if available
+                                    (deft: ${optim_num_partitions})
+--optim-use-val-partition <BOOL>  : Whether to use one partition for
+                                    validation during hyperparameter
+                                    optimization
+                                    (deft: ${optim_use_val_partition})
 "
 
 . parse_options.sh
@@ -97,6 +111,23 @@ if [ $# -lt 1 ]; then
   echo "${help_message}" | grep "Usage" 1>&2
   echo "$0 --help for more info" 1>&2
   exit 1
+fi
+
+min_optim_partitions=2
+if ${optim_use_val_partition} ; then
+  min_optim_partitions=3
+fi
+if [ "${optim_num_partitions}" -lt ${min_optim_partitions} ]; then
+  echo "\
+With --optim-use-val-partition set to ${optim_use_val_partition},
+--optim-partitions must be at least ${min_optim_partitions}" 1>&2
+  exit 1
+fi
+
+if python -c "import pydrobert.gpyopt" 2> /dev/null; then
+  write_optim_config=true
+else
+  write_optim_config=false
 fi
 
 tmp="$(mktemp -d)"
@@ -115,6 +146,9 @@ max_active=${max_active}
 max_mem=${max_mem}
 beam=${beam}
 lattice_beam=${lattice_beam}
+optim_data_set=${optim_data_set}
+optim_num_partitions=${optim_num_partitions}
+optim_use_val_partition=${optim_use_val_partition}
 " >> "${tmpf}"
   name="$(basename "$1")"
   shift
@@ -189,6 +223,20 @@ freq_dim = ${freq_dim}
 target_dim = ${target_dim}
 " > "${feat_cfg}"
 
+  if $write_optim_config ; then
+    if [ -f "localext/split_torch_data_dir.sh" ]; then
+      tmp_optim_partitions=( )
+      for n in $(seq 1 ${optim_num_partitions}); do
+        tmp_optim_partitions=( "${tmp_optim_partitions[@]}" "${tmp}/p${n}.txt" )
+      done
+      localext/split_torch_data_dir.sh \
+        "$(eval echo "\${${optim_data_set}_data}")" "${tmp_optim_partitions[@]}"
+    else
+      echo "No localext/split_torch_data_dir.sh, optim_partitions will be random"
+      tmp_optim_partitions=( ${optim_num_partitions} )
+    fi
+  fi
+
   while read line ; do
     IFS=',' read -a cfgs <<< "${line}"
     if [ -z "${cfgs[0]}" ]; then
@@ -217,9 +265,6 @@ seed = $(echo "10 * ${trial} + 4" | bc)
 " > "${trial_cfg}"
 
       mkdir -p "${tmp_trial_path}"
-      print-parameters-as-ini \
-        "${cfgs[@]}" "${feat_cfg}" "${trial_cfg}" \
-        > "${tmp_trial_path}/model.cfg"
       echo "\
 model_cfg='${exp_dir}/${trial_prefix}/model.cfg'
 state_dir='${exp_dir}/${trial_prefix}/states'
@@ -231,9 +276,35 @@ min_active=${min_active}
 max_active=${max_active}
 max_mem=${max_mem}
 beam=${beam}
-lattice_beam=${lattice_beam}
-" > "${tmp_trial_path}/variables"
-      cat "${data_dir}/variables" >> "${tmp_trial_path}/variables"
+lattice_beam=${lattice_beam}" > "${tmp_trial_path}/variables"
+cat "${data_dir}/variables" >> "${tmp_trial_path}/variables"
+
+      if $write_optim_config ; then
+        echo "\
+
+[optim]
+seed = $(echo "10 * ${trial} + 5" | bc)" >> "${trial_cfg}"
+        echo -n "\
+optim_out_config='${exp_dir}/${trial_prefix}/optimized.cfg'
+optim_history_csv='${exp_dir}/${trial_prefix}/optim_history.csv'
+optim_data_set=${optim_data_set}
+optim_use_val_partition=${optim_use_val_partition}
+optim_partitions=( " >> "${tmp_trial_path}/variables"
+        if [ "${#tmp_optim_partitions[@]}" = 1 ]; then
+          echo "${tmp_optim_partitions[0]} )" >> "${tmp_trial_path}/variables"
+        else
+          for n in $(seq 1 ${optim_num_partitions}); do
+            cp "${tmp_optim_partitions[n-1]}" "${tmp_trial_path}/p${n}.txt"
+            echo -n "'${exp_dir}/${trial_prefix}/p${n}.txt' " \
+              >> "${tmp_trial_path}/variables"
+          done
+          echo ")" >> "${tmp_trial_path}/variables"
+        fi
+      fi
+
+      print-parameters-as-ini \
+        "${cfgs[@]}" "${feat_cfg}" "${trial_cfg}" \
+        > "${tmp_trial_path}/model.cfg"
       echo "${trial_prefix}" >> "${tmp_exp_dir}/prefixes"
     done
   done < "${cfg_sample_file}"

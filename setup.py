@@ -75,8 +75,9 @@ if __name__ == '__main__':
                 'target-count-info-to-tensor = cnn_mellin.command_line:'
                 'target_count_info_to_tensor',
                 'optimize-acoustic-model = cnn_mellin.command_line:'
-                'optimize_acoustic_model',
+                'optimize_acoustic_model [optim]',
             ]
         },
+        extras_require={'optim': 'pydrobert-gpyopt'},
         tests_require=['pydrobert-gpyopt'],
     )

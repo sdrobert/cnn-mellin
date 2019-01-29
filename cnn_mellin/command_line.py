@@ -44,21 +44,45 @@ def _construct_default_param_dict():
     return dict_
 
 
-class CommaSerializer(serial.DefaultListSelectorSerializer):
+class CommaListSerializer(serial.DefaultSerializer):
     def help_string(self, name, parameterized):
-        choices_help_string = super(CommaSerializer, self).help_string(
-            name, parameterized)
-        return 'Elements separated by commas. ' + choices_help_string
+        return 'Elements separated by commas'
 
     def serialize(self, name, parameterized):
-        val = super(CommaSerializer, self).serialize(name, parameterized)
+        val = super(CommaListSerializer, self).serialize(name, parameterized)
         return ','.join(str(x) for x in val)
 
 
-class CommaDeserializer(serial.DefaultListSelectorDeserializer):
+class CommaListDeserializer(serial.DefaultDeserializer):
     def deserialize(self, name, block, parameterized):
-        block = block.split(',')
-        super(CommaDeserializer, self).deserialize(name, block, parameterized)
+        if block == '':
+            block = []
+        else:
+            block = block.split(',')
+        super(CommaListDeserializer, self).deserialize(
+            name, block, parameterized)
+
+
+class CommaListSelectorSerializer(serial.DefaultListSelectorSerializer):
+    def help_string(self, name, parameterized):
+        choices_help_string = super(
+            CommaListSelectorSerializer, self).help_string(name, parameterized)
+        return 'Elements separated by commas. ' + choices_help_string
+
+    def serialize(self, name, parameterized):
+        val = super(CommaListSelectorSerializer, self).serialize(
+            name, parameterized)
+        return ','.join(str(x) for x in val)
+
+
+class CommaListSelectorDeserializer(serial.DefaultListSelectorDeserializer):
+    def deserialize(self, name, block, parameterized):
+        if block == '':
+            block = []
+        else:
+            block = block.split(',')
+        super(CommaListSelectorDeserializer, self).deserialize(
+            name, block, parameterized)
 
 
 def _print_parameters_as_ini_parse_args(args):
@@ -94,11 +118,17 @@ def print_parameters_as_ini(args=None):
     for in_config in options.in_configs:
         serial.deserialize_from_ini(
             in_config, param_dict,
-            deserializer_type_dict={param.ListSelector: CommaDeserializer()},
+            deserializer_type_dict={
+                param.ListSelector: CommaListSelectorDeserializer(),
+                param.List: CommaListDeserializer(),
+            },
         )
     serial.serialize_to_ini(
         sys.stdout, param_dict,
-        serializer_type_dict={param.ListSelector: CommaSerializer()},
+        serializer_type_dict={
+            param.ListSelector: CommaListSelectorSerializer(),
+            param.List: CommaListSerializer()
+        },
         include_help=options.add_help_string
     )
     return 0
@@ -212,7 +242,10 @@ def _acoustic_model_forward_pdfs_parse_args(args):
         action=pargparse.ParameterizedIniReadAction,
         help='Read in a INI (config) file for settings',
         parameterized=param_dict,
-        deserializer_type_dict={param.ListSelector: CommaDeserializer()},
+        deserializer_type_dict={
+            param.ListSelector: CommaListSelectorDeserializer(),
+            param.List: CommaListDeserializer(),
+        },
     )
     parser.add_argument(
         '--device',
@@ -333,7 +366,10 @@ def _train_acoustic_model_parse_args(args):
         action=pargparse.ParameterizedIniReadAction,
         help='Read in a INI (config) file for settings',
         parameterized=param_dict,
-        deserializer_type_dict={param.ListSelector: CommaDeserializer()},
+        deserializer_type_dict={
+            param.ListSelector: CommaListSelectorDeserializer(),
+            param.List: CommaListDeserializer(),
+        },
     )
     parser.add_argument(
         '--device',
@@ -423,7 +459,10 @@ def _optimize_acoutic_model_parse_args(args):
         action=pargparse.ParameterizedIniReadAction,
         help='Read in a INI (config) file for settings',
         parameterized=param_dict,
-        deserializer_type_dict={param.ListSelector: CommaDeserializer()},
+        deserializer_type_dict={
+            param.ListSelector: CommaListSelectorDeserializer(),
+            param.List: CommaListDeserializer(),
+        },
     )
     parser.add_argument(
         '--device',
@@ -541,7 +580,10 @@ def optimize_acoustic_model(args=None):
                     **{param_name: getattr(optimized_params, param_name)})
     serial.serialize_to_ini(
         options.out_ini, options.config,
-        serializer_type_dict={param.ListSelector: CommaSerializer()},
+        serializer_type_dict={
+            param.ListSelector: CommaListSelectorSerializer(),
+            param.List: CommaListSerializer()
+        },
         include_help=options.add_help_string
     )
     return 0

@@ -20,7 +20,7 @@ OPTIM_DICT = {
     'nonlinearity': ('model', 'categorical', ('relu', 'sigmoid', 'tanh')),
     'flatten_style':
         ('model', 'categorical', ('keep_filts', 'keep_chans', 'keep_both')),
-    'init_num_channels': ('model', 'categorical', (1, 128, 256, 512)),
+    'init_num_channels': ('model', 'categorical', (1, 16, 32)),
     'mellin': ('model', 'categorical', (True, False)),
     'kernel_freq': ('model', 'discrete', (1, 9)),
     'factor_sched': ('model', 'discrete', (1, 3)),
@@ -51,8 +51,8 @@ OPTIM_DICT = {
     'optimizer':
         ('training', 'categorical', ('adam', 'adadelta', 'adagrad', 'sgd')),
     'weigh_training_samples': ('training', 'categorical', (True, False)),
-    'context_left': ('data_set', 'discrete', (0, 5)),
-    'context_right': ('data_set', 'discrete', (0, 5)),
+    'context_left': ('data_set', 'discrete', (0, 6)),
+    'context_right': ('data_set', 'discrete', (0, 6)),
     'batch_size': ('data_set', 'discrete', (1, 20)),
     'reverse': ('data_set', 'categorical', (True, False)),
 }
@@ -214,6 +214,7 @@ def optimize_am(
                     if i != eval_idx[0]
                 )))
                 val_subset_ids = train_subset_ids
+            print(kwargs)
             if subset_ids:
                 train_subset_ids &= subset_ids
                 val_subset_ids &= subset_ids
