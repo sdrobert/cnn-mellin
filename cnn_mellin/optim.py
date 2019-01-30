@@ -244,6 +244,17 @@ def optimize_am(
                     eval_idx[0] = to_next(eval_idx[0])
         except IOError:
             pass
+    # we add all possible optimizable parameters as fixed values. This way,
+    # those values will be recorded in the history csv AND constraints can
+    # use them
+    for key in OPTIM_DICT:
+        params_name = OPTIM_DICT[key][0]
+        if params_name == 'model':
+            wrapped.set_fixed_parameter(key, model_param_dict[key])
+        elif params_name == 'training':
+            wrapped.set_fixed_parameter(key, training_param_dict[key])
+        else:
+            wrapped.set_fixed_parameter(key, data_param_dict[key])
     for param_name in optim_params.to_optimize:
         param_type, param_constr = OPTIM_DICT[param_name][1:]
         wrapped.set_variable_parameter(param_name, param_type, param_constr)
