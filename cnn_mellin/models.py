@@ -201,8 +201,8 @@ class AcousticModel(torch.nn.Module):
         self._drop_p = p
 
 
-def estimate_total_size_bits(params, batch_size, window, bits_per_scalar=32):
-    '''Estimate the size of model + forward + backward in bits
+def estimate_total_size_bytes(params, batch_size, window, bytes_per_scalar=4):
+    '''Estimate the size of model + forward + backward in bytes
 
     Parameters
     ----------
@@ -212,6 +212,7 @@ def estimate_total_size_bits(params, batch_size, window, bits_per_scalar=32):
     window : int
         The total size of the context  window in time
         ``(context_left + context_right + 1)``
+    bytes_per_scalar : int
 
     Returns
     -------
@@ -219,37 +220,42 @@ def estimate_total_size_bits(params, batch_size, window, bits_per_scalar=32):
 
     Warning
     -------
-    This function is only meant to provide an estimate. It is untested and
-    probably not very accurate
+    This function is only meant to provide an estimate. See `my comment
+    <https://discuss.pytorch.org/t/rethinking-memory-estimates-for-training/36080>`_
+    for reasoning
     '''
-    # FIXME(sdrobert):
-    # https://discuss.pytorch.org/t/rethinking-memory-estimates-for-training/36080
-    total_output_scalars = 0
-    total_weight_scalars = 0
+    trainable_scalarrs = 0
+    nontrainable_scalars = 0
     conv_config = _get_conv_config(params, window)
-    total_input_scalars = batch_size * window * params.freq_dim
-    for layer_config in conv_config['layers']:
-        total_weight_scalars += (
-            layer_config['in_chan'] * layer_config['out_chan'] *
-            layer_config['kw'] * layer_config['kh']
-        ) + layer_config['out_chan']
-        total_output_scalars += (
-            layer_config['out_chan'] *
-            layer_config['out_w'] * layer_config['out_h']
-        )
+    input_scalars = window * params.freq_dim
+    max_scalars = input_scalars
+    for lc in conv_config['layers']:
+        trainable_scalarrs += (
+            lc['in_chan'] * lc['out_chan'] *
+            lc['kw'] * lc['kh']
+        ) + lc['out_chan']
+        out_size = lc['out_chan'] * lc['out_w'] * lc['out_h']
+        in_size = lc['in_chan'] * lc['in_w'] * lc['in_h']
+        input_scalars += in_size
+        nontrainable_scalars += batch_size * out_size  # dropout mask
+        max_scalars = max(max_scalars, in_size, out_size)
     prev_size = conv_config['out_size']
     for layer_idx in range(params.num_fc):
         if layer_idx == params.num_fc - 1:
             cur_size = params.target_dim
         else:
             cur_size = params.num_hidden
-        total_weight_scalars += prev_size * cur_size + cur_size
-        total_output_scalars += cur_size
+            nontrainable_scalars += batch_size * cur_size  # dropout mask
+        trainable_scalarrs += prev_size * cur_size + cur_size
+        input_scalars += prev_size
+        max_scalars = max(max_scalars, prev_size, cur_size)
         prev_size = cur_size
-    total_output_scalars *= 2 * batch_size  # backward pass and batch
+    input_scalars *= batch_size
     total_scalars = (
-        total_weight_scalars + total_output_scalars + total_input_scalars)
-    total_bits = total_scalars * bits_per_scalar
+        2 * trainable + nontrainable_scalars + input_scalars +
+        2 * max_scalars
+    )
+    total_bits = total_scalars * bytes_per_scalar
     return total_bits
 
 
