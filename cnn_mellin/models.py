@@ -1,8 +1,6 @@
 '''Acoustic models'''
 
 from itertools import chain
-from functools import reduce
-from operator import mul
 
 import param
 import torch
@@ -11,6 +9,11 @@ __author__ = "Sean Robertson"
 __email__ = "sdrobert@cs.toronto.edu"
 __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2018 Sean Robertson"
+__all__ = [
+    'AcousticModelParams',
+    'AcousticModel',
+    'estimate_total_size_bits',
+]
 
 
 class AcousticModelParams(param.Parameterized):
@@ -196,6 +199,58 @@ class AcousticModel(torch.nn.Module):
         for layer in self.drops:
             layer.p = p
         self._drop_p = p
+
+
+def estimate_total_size_bits(params, batch_size, window, bits_per_scalar=32):
+    '''Estimate the size of model + forward + backward in bits
+
+    Parameters
+    ----------
+    params : AcousticModelParams
+    batch_size : int
+        The size of the batch
+    window : int
+        The total size of the context  window in time
+        ``(context_left + context_right + 1)``
+
+    Returns
+    -------
+    total_bits : int
+
+    Warning
+    -------
+    This function is only meant to provide an estimate. It is untested and
+    probably not very accurate
+    '''
+    # FIXME(sdrobert):
+    # https://discuss.pytorch.org/t/rethinking-memory-estimates-for-training/36080
+    total_output_scalars = 0
+    total_weight_scalars = 0
+    conv_config = _get_conv_config(params, window)
+    total_input_scalars = batch_size * window * params.freq_dim
+    for layer_config in conv_config['layers']:
+        total_weight_scalars += (
+            layer_config['in_chan'] * layer_config['out_chan'] *
+            layer_config['kw'] * layer_config['kh']
+        ) + layer_config['out_chan']
+        total_output_scalars += (
+            layer_config['out_chan'] *
+            layer_config['out_w'] * layer_config['out_h']
+        )
+    prev_size = conv_config['out_size']
+    for layer_idx in range(params.num_fc):
+        if layer_idx == params.num_fc - 1:
+            cur_size = params.target_dim
+        else:
+            cur_size = params.num_hidden
+        total_weight_scalars += prev_size * cur_size + cur_size
+        total_output_scalars += cur_size
+        prev_size = cur_size
+    total_output_scalars *= 2 * batch_size  # backward pass and batch
+    total_scalars = (
+        total_weight_scalars + total_output_scalars + total_input_scalars)
+    total_bits = total_scalars * bits_per_scalar
+    return total_bits
 
 
 def _get_conv_config(params, window):
