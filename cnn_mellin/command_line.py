@@ -345,6 +345,7 @@ def acoustic_model_forward_pdfs(args=None):
                 options.config['pdfs_data'],
             )
         ),
+        pin_memory=(options.device.type == 'cuda'),
     )
     running.write_am_pdfs(
         model,
@@ -499,6 +500,9 @@ def _optimize_acoutic_model_parse_args(args):
         'printout'
     )
     parser.add_argument(
+        '--verbose', action='store_true', default=False,
+    )
+    parser.add_argument(
         '--data-set-config-section',
         choices=['train_data', 'val_data', 'pdfs_data'], default='train_data',
         help='What section of the configuration to combine with [data] to '
@@ -566,6 +570,7 @@ def optimize_acoustic_model(args=None):
         device=options.device,
         train_num_data_workers=options.train_num_data_workers,
         history_csv=options.history_csv,
+        verbose=options.verbose,
     )
     # only set the values that could have been optimized. This avoids weirdness
     # like setting the partition for individual data sets

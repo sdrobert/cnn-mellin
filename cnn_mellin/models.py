@@ -12,7 +12,7 @@ __copyright__ = "Copyright 2018 Sean Robertson"
 __all__ = [
     'AcousticModelParams',
     'AcousticModel',
-    'estimate_total_size_bits',
+    'estimate_total_size_bytes',
 ]
 
 
@@ -142,7 +142,7 @@ class AcousticModel(torch.nn.Module):
         else:
             Nonlin = torch.nn.Tanh
         if params.dropout2d_on_conv:
-            Dropout = torch.nn.Dropout2D
+            Dropout = torch.nn.Dropout2d
         else:
             Dropout = torch.nn.Dropout
         conv_config = _get_conv_config(params, window)
@@ -201,62 +201,56 @@ class AcousticModel(torch.nn.Module):
         self._drop_p = p
 
 
-def estimate_total_size_bytes(params, batch_size, window, bytes_per_scalar=4):
+def estimate_total_size_bytes(params, num_windows, window, bytes_per_scalar=4):
     '''Estimate the size of model + forward + backward in bytes
 
     Parameters
     ----------
     params : AcousticModelParams
-    batch_size : int
-        The size of the batch
+    num_windows : int
+        The number of windows in a given batch
     window : int
         The total size of the context  window in time
         ``(context_left + context_right + 1)``
-    bytes_per_scalar : int
 
     Returns
     -------
-    total_bits : int
+    total_bytes : int
 
     Warning
     -------
-    This function is only meant to provide an estimate. See `my comment
-    <https://discuss.pytorch.org/t/rethinking-memory-estimates-for-training/36080>`_
-    for reasoning
+    This function is only meant to provide an estimate. It is untested and
+    probably not very accurate
     '''
-    trainable_scalarrs = 0
-    nontrainable_scalars = 0
+    # FIXME(sdrobert):
+    # https://discuss.pytorch.org/t/rethinking-memory-estimates-for-training/36080
+    total_output_scalars = 0
+    total_weight_scalars = 0
     conv_config = _get_conv_config(params, window)
-    input_scalars = window * params.freq_dim
-    max_scalars = input_scalars
-    for lc in conv_config['layers']:
-        trainable_scalarrs += (
-            lc['in_chan'] * lc['out_chan'] *
-            lc['kw'] * lc['kh']
-        ) + lc['out_chan']
-        out_size = lc['out_chan'] * lc['out_w'] * lc['out_h']
-        in_size = lc['in_chan'] * lc['in_w'] * lc['in_h']
-        input_scalars += in_size
-        nontrainable_scalars += batch_size * out_size  # dropout mask
-        max_scalars = max(max_scalars, in_size, out_size)
+    total_input_scalars = num_windows * window * params.freq_dim
+    for layer_config in conv_config['layers']:
+        total_weight_scalars += (
+            layer_config['in_chan'] * layer_config['out_chan'] *
+            layer_config['kw'] * layer_config['kh']
+        ) + layer_config['out_chan']
+        total_output_scalars += (
+            layer_config['out_chan'] *
+            layer_config['out_w'] * layer_config['out_h']
+        )
     prev_size = conv_config['out_size']
     for layer_idx in range(params.num_fc):
         if layer_idx == params.num_fc - 1:
             cur_size = params.target_dim
         else:
-            cur_size = params.num_hidden
-            nontrainable_scalars += batch_size * cur_size  # dropout mask
-        trainable_scalarrs += prev_size * cur_size + cur_size
-        input_scalars += prev_size
-        max_scalars = max(max_scalars, prev_size, cur_size)
+            cur_size = params.hidden_size
+        total_weight_scalars += prev_size * cur_size + cur_size
+        total_output_scalars += cur_size
         prev_size = cur_size
-    input_scalars *= batch_size
+    total_output_scalars *= 2 * num_windows  # backward pass and batch
     total_scalars = (
-        2 * trainable + nontrainable_scalars + input_scalars +
-        2 * max_scalars
-    )
-    total_bits = total_scalars * bytes_per_scalar
-    return total_bits
+        total_weight_scalars + total_output_scalars + total_input_scalars)
+    total_bytes = total_scalars * bytes_per_scalar
+    return total_bytes
 
 
 def _get_conv_config(params, window):
@@ -360,6 +354,8 @@ def _get_conv_config(params, window):
             'out_chan': cur_chan,
             'kw': kw,
             'kh': kh,
+            'in_w': prev_w,
+            'in_h': prev_h,
             'out_w': cur_w,
             'out_h': cur_h,
             'kwargs': kwargs

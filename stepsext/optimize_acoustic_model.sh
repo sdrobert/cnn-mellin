@@ -22,6 +22,7 @@ echo "$0 $*"
 
 device=
 train_num_data_workers=
+verbose=false
 help_message="Optimize acoustic model parameters from an experiment matrix
 
 Usage: $0 [options] (<trial-dir> | <matrix-file> <line>)
@@ -128,10 +129,17 @@ fi
 
 data_dir="$(eval "echo \${${optim_data_set}_data}")"
 
+if $verbose ; then
+  verbose=--verbose
+else
+  verbose=
+fi
+
 optimize-acoustic-model \
   --config "${model_cfg}" \
   --device "${device}" \
   --history-csv "${optim_history_csv}" \
+  ${verbose} \
   ${no_optim_val_partition+--no-val-partition} \
   ${train_num_data_workers:+--train-num-data-workers "${train_num_data_workers}"} \
   ${weight_file:+--weight-tensor-file "${weight_file}"} \

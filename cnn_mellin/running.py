@@ -8,6 +8,8 @@ import os
 import time
 import warnings
 
+from itertools import count as icount
+
 import torch
 import param
 import pydrobert.torch.training as training
@@ -41,6 +43,7 @@ def get_am_alignment_cross_entropy(
     average_loss : float
         The cross-entropy loss averaged over all context windows
     '''
+    device = torch.device(device)
     if not len(data_loader):
         raise ValueError('There must be at least one batch of data!')
     total_windows = 0
@@ -50,15 +53,18 @@ def get_am_alignment_cross_entropy(
     loss_fn = torch.nn.CrossEntropyLoss(weight=weight, reduction='sum')
     model = model.to(device)
     model.eval()
+    non_blocking = device.type == 'cpu' or data_loader.pin_memory
     with torch.no_grad():
         for feats, ali, feat_sizes, _ in data_loader:
             total_windows += sum(feat_sizes)
             if ali is None:
                 raise ValueError('Alignments must be specified!')
-            feats = feats.to(device)
-            ali = ali.to(device)
+            feats = feats.to(device, non_blocking=non_blocking)
+            ali = ali.to(device, non_blocking=non_blocking)
             joint = model(feats)
-            total_loss += loss_fn(joint, ali).item()
+            loss = loss_fn(joint, ali)
+            total_loss += loss.item()
+            del feats, ali, joint, loss
     return total_loss / total_windows
 
 
@@ -81,12 +87,14 @@ def write_am_pdfs(model, data_loader, log_prior, device='cpu', pdfs_dir=None):
         If set, pdfs will be written to this directory. Otherwise, pdfs will
         be written to the `data_loader`'s ``data_dir + '/pdfs'``
     '''
+    device = torch.device(device)
     model = model.to(device)
     log_prior = log_prior.to(device)
     model.eval()
+    non_blocking = device.type == 'cpu' or data_loader.pin_memory
     with torch.no_grad():
         for feats, _, feat_sizes, utt_ids in data_loader:
-            feats = feats.to(device)
+            feats = feats.to(device, non_blocking=non_blocking)
             y = model(feats)
             joint = torch.nn.functional.log_softmax(y, dim=1)
             pdf = joint - log_prior
@@ -145,6 +153,7 @@ def train_am_for_epoch(
     running_loss : float
         The batch-averaged cross-entropy loss for the epoch
     '''
+    device = torch.device(device)
     epoch_loss = 0.
     total_batches = 0
     if epoch is None:
@@ -167,27 +176,24 @@ def train_am_for_epoch(
         torch.manual_seed(params.seed + epoch)
     model.dropout = params.dropout_prob
     loss_fn = torch.nn.CrossEntropyLoss(weight=weight)
+    non_blocking = device.type == 'cpu' or data_loader.pin_memory
     for feats, ali in data_loader:
-        feats = feats.to(device)
-        ali = ali.to(device)
         optimizer.zero_grad()
+        feats = feats.to(device, non_blocking=non_blocking)
+        ali = ali.to(device, non_blocking=non_blocking)
         pdfs = model(feats)
-        loss = loss_fn(pdfs, ali)
+        loss = loss_fn(model(feats), ali)
+        epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
-        epoch_loss += loss.item()
         total_batches += 1
+        del feats, ali, pdfs, loss
     return epoch_loss / total_batches
 
 
 class TrainingParams(TrainingEpochParams, training.TrainingStateParams):
     optimizer = param.ObjectSelector(
-        torch.optim.Adam, objects={
-            'adam': torch.optim.Adam,
-            'adadelta': torch.optim.Adadelta,
-            'adagrad': torch.optim.Adagrad,
-            'sgd': torch.optim.SGD,
-        },
+        'adam', objects=['adam', 'adadelta', 'adagrad', 'sgd'],
         doc='The optimizer to train with'
     )
     weight_decay = param.Number(
@@ -262,9 +268,22 @@ def train_am(
         model_params,
         1 + train_params.context_left + train_params.context_right,
     )
-    optimizer = training_params.optimizer(
+    if training_params.optimizer == 'adam':
+        optimizer = torch.optim.Adam
+    elif training_params.optimizer == 'adadelta':
+        optimizer = torch.optim.Adadelta
+    elif training_params.optimizer == 'adagrad':
+        optimizer = torch.optim.Adagrad
+    else:
+        optimizer = torch.optim.SGD
+    optimizer_kwargs = {
+        'weight_decay': training_params.weight_decay,
+    }
+    if training_params.log10_learning_rate is not None:
+        optimizer_kwargs['lr'] = 10 ** training_params.log10_learning_rate
+    optimizer = optimizer(
         model.parameters(),
-        weight_decay=training_params.weight_decay,
+        **optimizer_kwargs
     )
     controller = training.TrainingStateController(
         training_params,

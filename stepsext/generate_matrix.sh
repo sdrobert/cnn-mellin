@@ -28,7 +28,7 @@ max_mem=50000000
 beam=13.0
 lattice_beam=8.0
 optim_data_set=train
-optim_num_partitions=3
+optim_num_partitions=5
 optim_use_val_partition=true
 help_message="Generate an experiment matrix for cnn-mellin
 
