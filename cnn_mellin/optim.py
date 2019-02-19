@@ -36,7 +36,7 @@ OPTIM_DICT = {
             "pad-then-dec", "pad-to-dec-time-floor", "pad-to-dec-time-ceil")),
     'channels_factor': ('model', 'discrete', (1, 2, 4)),
     'num_fc': ('model', 'discrete', tuple(range(1, 5))),
-    'num_conv': ('model', 'discrete', tuple(range(1, 11))),
+    'num_conv': ('model', 'discrete', tuple(range(0, 11))),
     'hidden_size': ('model', 'discrete', (512, 1024, 2048)),
     'dropout2d_on_conv': ('model', 'categorical', (True, False)),
     'time_factor': ('model', 'discrete', (1, 2, 4)),
