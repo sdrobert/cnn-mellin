@@ -35,8 +35,8 @@ OPTIM_DICT = {
         ('model', 'categorical', (
             "pad-then-dec", "pad-to-dec-time-floor", "pad-to-dec-time-ceil")),
     'channels_factor': ('model', 'discrete', (1, 2, 4)),
-    'num_fc': ('model', 'discrete', tuple(range(1, 5))),
-    'num_conv': ('model', 'discrete', tuple(range(0, 11))),
+    'num_fc': ('model', 'discrete', tuple(range(1, 4))),
+    'num_conv': ('model', 'discrete', tuple(range(0, 6))),
     'hidden_size': ('model', 'discrete', (512, 1024, 2048)),
     'dropout2d_on_conv': ('model', 'categorical', (True, False)),
     'time_factor': ('model', 'discrete', (1, 2, 4)),
@@ -58,7 +58,7 @@ OPTIM_DICT = {
     'weigh_training_samples': ('training', 'categorical', (True, False)),
     'context_left': ('data_set', 'discrete', tuple(range(0, 7))),
     'context_right': ('data_set', 'discrete', tuple(range(0, 7))),
-    'batch_size': ('data_set', 'discrete', tuple(range(1, 21))),
+    'batch_size': ('data_set', 'discrete', tuple(range(5, 21))),
     'reverse': ('data_set', 'categorical', (True, False)),
 }
 
@@ -181,6 +181,7 @@ def optimize_am(
     optimization, though those seeds are retained in the returned
     parameters. Seeds are dynamically incremented for each retraining.
     '''
+    device = torch.device(device)
     subset_ids = set(base_data_set_params.subset_ids)
     if isinstance(partitions, int):
         utt_ids = data.SpectDataSet(
@@ -321,8 +322,9 @@ def optimize_am(
                     model, eval_data, device=device)
             except KeyboardInterrupt:
                 raise
-            except Exception as e:
-                print('Got exception: {}. Assigning bad loss.'.format(e))
+            except Exception:
+                traceback.print_exc()
+                print('Exception was caught. Assigning bad loss')
             finally:
                 if xent != xent:
                     xent = optim_params.nan_or_failure_loss

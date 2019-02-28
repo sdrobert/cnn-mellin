@@ -181,13 +181,13 @@ def train_am_for_epoch(
         optimizer.zero_grad()
         feats = feats.to(device, non_blocking=non_blocking)
         ali = ali.to(device, non_blocking=non_blocking)
-        pdfs = model(feats)
         loss = loss_fn(model(feats), ali)
+        print(loss.item())
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
         total_batches += 1
-        del feats, ali, pdfs, loss
+        del feats, ali, loss
     return epoch_loss / total_batches
 
 
