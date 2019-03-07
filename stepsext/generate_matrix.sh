@@ -30,6 +30,7 @@ lattice_beam=8.0
 optim_data_set=train
 optim_num_partitions=5
 optim_use_val_partition=true
+optim_history_url_prefix='sqlite:///'
 help_message="Generate an experiment matrix for cnn-mellin
 
 Usage: $0 [options] <torch-data-group> [<config-group-1> [<config-group-2 [...]]]
@@ -103,6 +104,10 @@ Options
                                     validation during hyperparameter
                                     optimization
                                     (deft: ${optim_use_val_partition})
+--optim-history-url-prefix <STR>  : The prefix to append to the database file,
+                                    deciding database backend. See SQLAlchemy
+                                    for more details
+                                    (def: ${optim_history_url_prefix})
 "
 
 . parse_options.sh
@@ -124,7 +129,7 @@ With --optim-use-val-partition set to ${optim_use_val_partition},
   exit 1
 fi
 
-if python -c "import pydrobert.gpyopt" 2> /dev/null; then
+if python -c "import cnn_mellin.optim" 2> /dev/null; then
   write_optim_config=true
 else
   write_optim_config=false
@@ -286,9 +291,10 @@ cat "${data_dir}/variables" >> "${tmp_trial_path}/variables"
 seed = $(echo "10 * ${trial} + 5" | bc)" >> "${trial_cfg}"
         echo -n "\
 optim_out_config='${exp_dir}/${trial_prefix}/optimized.cfg'
-optim_history_csv='${exp_dir}/${trial_prefix}/optim_history.csv'
+optim_history_url='${optim_history_url_prefix}${exp_dir}/${cfg_dir_name}/history.db'
 optim_data_set=${optim_data_set}
 optim_use_val_partition=${optim_use_val_partition}
+optim_agent=trial_${trial}
 optim_partitions=( " >> "${tmp_trial_path}/variables"
         if [ "${#tmp_optim_partitions[@]}" = 1 ]; then
           echo "${tmp_optim_partitions[0]} )" >> "${tmp_trial_path}/variables"

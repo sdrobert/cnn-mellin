@@ -11,6 +11,7 @@ import cnn_mellin.optim as optim
 import cnn_mellin.models as models
 import cnn_mellin.running as running
 import pydrobert.torch.data as data
+import optuna
 
 
 @pytest.mark.parametrize('partition_style', ['round-robin', 'average', 'last'])
@@ -21,13 +22,11 @@ def test_optimize_am(
         temp_dir, populate_torch_dir, partition_style, val_partition,
         partitions, device, intermediate_hist_size):
     data_dir = os.path.join(temp_dir, 'data')
-    history_csv = os.path.join(temp_dir, 'hist.csv')
+    history_db = os.path.join(temp_dir, 'hist.db')
     populate_torch_dir(data_dir, 100)
     partitions += 1 if val_partition else 0
     optim_params = optim.CNNMellinOptimParams(
         partition_style=partition_style,
-        model_type='gp',
-        noise_var=0.1,
         max_samples=10,
         to_optimize=['weight_decay'],
         seed=2,
@@ -39,7 +38,7 @@ def test_optimize_am(
         num_fc=1,
     )
     base_training_params = running.TrainingParams(
-        num_epochs=1,
+        num_epochs=2,
     )
     base_data_params = data.ContextWindowDataSetParams(
         context_left=0,
@@ -53,6 +52,7 @@ def test_optimize_am(
         val_partition=val_partition,
         weight=weight,
         device=device,
+        verbose=True,
     )
     first_decay = training_params.weight_decay
     optim_params.max_samples = intermediate_hist_size
@@ -62,7 +62,7 @@ def test_optimize_am(
         val_partition=val_partition,
         weight=weight,
         device=device,
-        history_csv=history_csv,
+        history_url='sqlite:///' + history_db,
     )
     optim_params.max_samples = 10
     _, training_params, _ = optim.optimize_am(
@@ -71,19 +71,15 @@ def test_optimize_am(
         val_partition=val_partition,
         weight=weight,
         device=device,
-        history_csv=history_csv,
+        history_url='sqlite:///' + history_db,
     )
-    min_Y = float('inf')
-    min_decay = -1.
-    with open(history_csv) as f:
-        for line_idx, line in enumerate(f):
-            line = [x.strip() for x in line.split(',')]
-            if not line_idx:
-                Y_idx = line.index('Y')
-                weight_decay_idx = line.index('weight_decay')
-            else:
-                Y, decay = float(line[Y_idx]), float(line[weight_decay_idx])
-                if min_Y > Y:
-                    min_Y, min_decay = Y, decay
-    assert abs(min_decay - training_params.weight_decay) <= 1e-5
-    assert abs(min_decay - first_decay) <= 1e-5
+    assert os.path.exists(history_db)
+    study = optuna.create_study(
+        storage='sqlite:///' + history_db,
+        study_name=optim_params.study_name,
+        load_if_exists=True,
+    )
+    assert (
+        abs(
+            training_params.weight_decay -
+            study.best_params['weight_decay']) <= 1e-5)

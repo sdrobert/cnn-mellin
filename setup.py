@@ -78,6 +78,6 @@ if __name__ == '__main__':
                 'optimize_acoustic_model [optim]',
             ]
         },
-        extras_require={'optim': 'pydrobert-gpyopt'},
-        tests_require=['pydrobert-gpyopt'],
+        extras_require={'optim': 'optuna'},
+        tests_require=['optuna'],
     )

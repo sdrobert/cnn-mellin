@@ -7,9 +7,10 @@ import traceback
 import sys
 
 from itertools import chain
+from time import time
 
+import optuna
 import param
-import pydrobert.gpyopt as gpyopt
 import pydrobert.torch.data as data
 import numpy as np
 import cnn_mellin.models as models
@@ -25,45 +26,103 @@ OPTIM_DICT = {
     'nonlinearity': ('model', 'categorical', ('relu', 'sigmoid', 'tanh')),
     'flatten_style':
         ('model', 'categorical', ('keep_filts', 'keep_chans', 'keep_both')),
-    'init_num_channels': ('model', 'discrete', (1, 16, 32, 64)),
+    'init_num_channels': ('model', 'int', (1, 64)),
     'mellin': ('model', 'categorical', (True, False)),
-    'kernel_freq': ('model', 'discrete', tuple(range(1, 10))),
-    'factor_sched': ('model', 'discrete', tuple(range(1, 3))),
-    'kernel_time': ('model', 'discrete', tuple(range(1, 10))),
-    'freq_factor': ('model', 'discrete', (1, 2, 4)),
+    'kernel_freq': ('model', 'int', (1, 10)),
+    'factor_sched': ('model', 'int', (1, 2)),
+    'kernel_time': ('model', 'int', (1, 10)),
+    'freq_factor': ('model', 'int', (1, 4)),
     'mconv_decimation_strategy':
         ('model', 'categorical', (
             "pad-then-dec", "pad-to-dec-time-floor", "pad-to-dec-time-ceil")),
-    'channels_factor': ('model', 'discrete', (1, 2, 4)),
-    'num_fc': ('model', 'discrete', tuple(range(1, 4))),
-    'num_conv': ('model', 'discrete', tuple(range(0, 6))),
-    'hidden_size': ('model', 'discrete', (512, 1024, 2048)),
+    'channels_factor': ('model', 'int', (1, 4)),
+    'num_fc': ('model', 'int', (1, 3)),
+    'num_conv': ('model', 'int', (0, 3)),
+    'hidden_size': ('model', 'categorical', (512, 1024, 2048)),
     'dropout2d_on_conv': ('model', 'categorical', (True, False)),
-    'time_factor': ('model', 'discrete', (1, 2, 4)),
-    'early_stopping_threshold': ('training', 'continuous', (0.0, 0.5)),
-    'early_stopping_patience': ('training', 'discrete', tuple(range(1, 11))),
-    'early_stopping_burnin': ('training', 'discrete', tuple(range(0, 11))),
-    'reduce_lr_threshold': ('training', 'continuous', (0.0, 0.5)),
-    'reduce_lr_factor': ('training', 'continuous', (0.1, 0.5)),
-    'reduce_lr_patience': ('training', 'discrete', tuple(range(1, 11))),
-    'reduce_lr_cooldown': ('training', 'discrete', tuple(range(0, 11))),
-    'reduce_lr_log10_epsilon': ('training', 'discrete', tuple(range(-10, -1))),
-    'reduce_lr_burnin': ('training', 'discrete', tuple(range(0, 11))),
-    'dropout_prob': ('training', 'continuous', (0.0, 0.5)),
-    'weight_decay': ('training', 'continuous', (0.0, 1.0)),
-    'num_epochs': ('training', 'discrete', tuple(range(1, 31))),
-    'log10_learning_rate': ('training', 'discrete', tuple(range(-10, -3))),
+    'time_factor': ('model', 'int', (1, 4)),
+    'early_stopping_threshold': ('training', 'uniform', (0.0, 0.5)),
+    'early_stopping_patience': ('training', 'int', (1, 10)),
+    'early_stopping_burnin': ('training', 'int', (0, 10)),
+    'reduce_lr_threshold': ('training', 'uniform', (0.0, 0.5)),
+    'reduce_lr_factor': ('training', 'log_uniform', (0.1, 0.5)),
+    'reduce_lr_patience': ('training', 'int', (1, 10)),
+    'reduce_lr_cooldown': ('training', 'int', (0, 10)),
+    'reduce_lr_log10_epsilon': ('training', 'uniform', (-10, -2)),
+    'reduce_lr_burnin': ('training', 'discrete', (0, 10)),
+    'dropout_prob': ('training', 'log_uniform', (1e-5, 0.5)),
+    'weight_decay': ('training', 'log_uniform', (1e-5, 0.5)),
+    'num_epochs': ('training', 'int', (5, 30)),
+    'log10_learning_rate': ('training', 'uniform', (-10, -3)),
     'optimizer':
         ('training', 'categorical', ('adam', 'adadelta', 'adagrad', 'sgd')),
     'weigh_training_samples': ('training', 'categorical', (True, False)),
-    'context_left': ('data_set', 'discrete', tuple(range(0, 7))),
-    'context_right': ('data_set', 'discrete', tuple(range(0, 7))),
-    'batch_size': ('data_set', 'discrete', tuple(range(5, 21))),
+    'context_left': ('data_set', 'int', (0, 10)),
+    'context_right': ('data_set', 'int', (0, 10)),
+    'batch_size': ('data_set', 'int', (5, 20)),
     'reverse': ('data_set', 'categorical', (True, False)),
 }
 
 
-class CNNMellinOptimParams(gpyopt.BayesianOptimizationParams):
+# this is inspired by Yusuke's class here:
+# https://github.com/Minyus/optkeras/blob/1ccd3ba89cfa9bdf973f73045111eeae1060c3c5/optkeras/optkeras.py#L318
+# We also prune repeats when they've failed or been pruned, as well as the
+# "running" ones that were interrupted
+class RepeatPruner(optuna.pruners.BasePruner):
+    '''Prune if we've already tried those parameters'''
+    def prune(self, storage, study_id, trial_id, step):
+        cur_trial = storage.get_trial(trial_id)
+        agent_name = cur_trial.user_attrs.get('agent_name', float('nan'))
+        trials = storage.get_all_trials(study_id)
+        for trial in trials:
+            if trial.trial_id == trial_id:
+                continue
+            if (
+                    trial.state == optuna.structs.TrialState.RUNNING and
+                    (
+                        trial.user_attrs.get('agent_name', float('nan')) ==
+                        agent_name)):
+                continue
+            if trial.params == cur_trial.params:
+                return True
+        return False
+
+
+class TimerPruner(optuna.pruners.BasePruner):
+    '''Prune if a step exceeds some wall clock time threshold'''
+
+    def __init__(self, seconds):
+        super(TimerPruner, self).__init__()
+        self.seconds = seconds
+
+    def prune(self, storage, study_id, trial_id, step):
+        stamp = time()
+        trial = storage.get_trial(trial_id)
+        stamps = trial.user_attrs.get('intermediate_timestamps', [])
+        stamps.append(stamp)
+        storage.set_trial_user_attr(
+            trial_id, 'intermediate_timestamps', stamps)
+        if len(stamps) == 1:
+            return False
+        prev_stamp = stamps[-2]
+        return abs(stamp - prev_stamp) > self.seconds
+
+
+class ChainOrPruner(optuna.pruners.BasePruner):
+    '''Prune if one of any passed pruners tells us to'''
+
+    def __init__(self, pruners):
+        super(ChainOrPruner, self).__init__()
+        self.pruners = list(pruners)
+
+    def prune(self, storage, study_id, trial_id, step):
+        for pruner in self.pruners:
+            if pruner.prune(storage, study_id, trial_id, step):
+                return True
+        return False
+
+
+class CNNMellinOptimParams(param.Parameterized):
     to_optimize = param.ListSelector(
         [], objects=list(OPTIM_DICT),
         doc='A list of hyperparameters to optimize with a call to '
@@ -83,45 +142,52 @@ class CNNMellinOptimParams(gpyopt.BayesianOptimizationParams):
         'training to. This should not be set to the full size of the device, '
         'in case the model size is underestimated'
     )
-    nan_or_failure_loss = param.Number(
-        10.0, bounds=(0., None),
-        doc='If an exception occurs (e.g. out of memory) or the loss is NaN, '
-        'the loss will be substituted for this value. If you set this too '
-        'high, it will mess with the variance of the underlying Gaussian '
-        'process. Too low, and it could become an optimum. Suggested value is '
-        'twice the average loss you see in random samples'
+    seed = param.Integer(
+        None,
+        doc='Seed used for bayesian optimization'
     )
-
-
-# modified from
-# https://docs.fast.ai/troubleshoot.html#memory-leakage-on-exception
-# we can use this decorator to clean up after ourselves on badness
-def _gpu_mem_restore(sub_loss):
-    "Reclaim GPU RAM if CUDA out of memory happened"
-    def _gpu_mem_restore_inner(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            loss = float('nan')
-            try:
-                loss = func(*args, **kwargs)
-            except KeyboardInterrupt:
-                raise
-            except Exception:
-                type, val, tb = sys.exc_info()
-                print('Got exception: ', val, '. Handling', file=sys.stderr)
-                traceback.clear_frames(tb)
-            if loss != loss:
-                loss = sub_loss
-            return loss
-        return wrapper
-    return _gpu_mem_restore_inner
+    max_samples = param.Integer(
+        None, bounds=(0, None),
+        doc='If set, the max number of samples. history and '
+        'initial_design_samples both count towards this. E.g. max_samples=5, '
+        'initial_design_numdata=4, and 3 samples have been loaded from a '
+        'history file. 1 sample will be taken to complete the initial design, '
+        ' 1 according to the acquisition function over the initial design\'s '
+        'samples. If running in distributed mode, there is no guarantee that '
+        'this number will be resepected'
+    )
+    initial_design_samples = param.Integer(
+        5, bounds=(0, None),
+        doc='The number of initial samples before optimization. History counts'
+        'towards this. This number does not matter if random sampling'
+    )
+    sampler = param.ObjectSelector(
+        'tpe', objects=['tpe', 'random'],
+        doc='What performs the optimization. tpe = Tree of Parzen Estimators '
+        'with EI; random = random sampling'
+    )
+    study_name = param.String(
+        'optim_am', allow_None=False,
+        doc='What the study is called in the history database, if it exists'
+    )
+    max_time_per_epoch = param.Number(
+        None, bounds=(1., None),
+        doc='The maximum time, in seconds, allowed to train a model for an '
+        'epoch. If exceeded, once the epoch is done, the trial will be pruned.'
+        ' If unset, no trial will time out'
+    )
+    median_pruner_epoch_warmup = param.Integer(
+        None, bounds=(0, None),
+        doc='If set, median pruning will be enabled, and will begin after '
+        'these many epochs. If unset, median pruning will be disabled'
+    )
 
 
 def optimize_am(
         data_dir, partitions, optim_params, base_model_params,
         base_training_params, base_data_set_params, val_partition=False,
         weight=None, device='cpu', train_num_data_workers=os.cpu_count() - 1,
-        history_csv=None, verbose=False):
+        history_url=None, verbose=False, agent_name=None):
     '''Optimize acoustic model hyperparameters
 
     Parameters
@@ -164,11 +230,18 @@ def optimize_am(
         The number of worker threads to spawn to serve training data. 0 means
         data are served on the main thread. The default is one fewer than the
         number of CPUs available
-    history_csv : str, optional
-        If set, the optimization history will be loaded and stored from a CSV
-        file at this path
+    history_url : str, optional
+        If set, the optimization history will be loaded and stored from a
+        relational database according to SQLAlchemy
     verbose : bool, optional
         Print intermediate results, like epoch loss and current settings
+    agent_name : str, optional
+        A name assigned to the caller. If restarting after a SIGINT, trial(s)
+        will exist in the database with state RUNNING that are not actually
+        running anymore. If `agent_name` is set, trials whose `agent_name`
+        properties match `agent_name` and whose states are RUNNING will be
+        discounted from seed and evalution partition calculations, improving
+        reproducibility (in the non-distributed case)
 
     Returns
     -------
@@ -181,13 +254,21 @@ def optimize_am(
     optimization, though those seeds are retained in the returned
     parameters. Seeds are dynamically incremented for each retraining.
     '''
+    if optim_params.seed is None:
+        optim_seed = np.random.randint(1000000000)
+    else:
+        optim_seed = optim_params.seed
+    if verbose:
+        optuna.logging.set_verbosity(optuna.logging.INFO)
+    else:
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
     device = torch.device(device)
     subset_ids = set(base_data_set_params.subset_ids)
     if isinstance(partitions, int):
         utt_ids = data.SpectDataSet(
             data_dir, subset_ids=subset_ids if subset_ids else None).utt_ids
         utt_ids = sorted(utt_ids)
-        rng = np.random.RandomState(seed=optim_params.seed)
+        rng = np.random.RandomState(seed=optim_seed)
         rng.shuffle(utt_ids)
         new_partitions = []
         partition_size = len(utt_ids) // partitions
@@ -208,23 +289,54 @@ def optimize_am(
         )
         optim_params.to_optimize.remove('weigh_training_samples')
     partitions_to_average = 1
-    eval_idx = [num_partitions - 1]
-    seed = [0]
     model_param_dict = param.param_union(base_model_params)
     training_param_dict = param.param_union(base_training_params)
     data_param_dict = param.param_union(base_data_set_params)
+    if optim_params.sampler == 'tpe':
+        sampler = optuna.samplers.TPESampler(
+            consider_endpoints=True,
+            n_startup_trials=optim_params.initial_design_samples,
+            seed=optim_seed,
+        )
+    else:
+        sampler = optuna.samplers.RandomSampler(seed=optim_seed)
+    study = optuna.create_study(
+        storage=history_url,
+        study_name=optim_params.study_name,
+        sampler=sampler,
+        load_if_exists=True,
+        pruner=ChainOrPruner([
+            RepeatPruner(),
+            # we always include the TimerPruner, even if disabled, so we can
+            # record the epoch-wise time to completion
+            TimerPruner(
+                float('inf') if optim_params.max_time_per_epoch is None
+                else optim_params.max_time_per_epoch
+            ),
+        ])
+    )
+    if optim_params.median_pruner_epoch_warmup is not None:
+        study.pruner.pruners.append(optuna.pruners.MedianPruner(
+            n_startup_trials=optim_params.initial_design_samples,
+            n_warmup_steps=optim_params.median_pruner_epoch_warmup,
+        ))
+    running_discount = sum(
+        1 for trial in study.trials
+        if trial.state == optuna.structs.TrialState.RUNNING and
+        trial.user_attrs.get('agent_name', float('nan')) == agent_name
+    )
 
-    def to_next(x):
-        return (x + 1) % num_partitions
-    if optim_params.partition_style == 'last':
+    def to_next_seed(trial):
+        return ((trial.trial_id - running_discount) * 44893) % 49811
 
-        def to_next(x):
-            return x
+    def to_next_partition(trial):
+        return num_partitions - 1
+    if optim_params.partition_style == 'round-robin':
+
+        def to_next_partition(trial):
+            return (trial.trial_id - running_discount) % num_partitions
     elif optim_params.partition_style == 'average':
         partitions_to_average = num_partitions
-    # gpyopt has been very buggy about constraints. Instead, we'll raise in
-    # the objective function whenever the constraint hasn't been met, which
-    # will give us a substitute value
     if optim_params.model_estimate_memory_limit_bytes is not None:
         # data_params.batch_size refers to the number of utterances, whereas
         # our estimates are based on the number of windows. We'll iterate
@@ -247,56 +359,75 @@ def optimize_am(
     else:
         max_num_windows = None
 
-    def objective(**kwargs):
-        if verbose:
-            print('Evaluating objective @ {}'.format(kwargs))
+    def objective(trial):
+        trial.set_user_attr('agent_name', agent_name)
         model_params = models.AcousticModelParams(**model_param_dict)
-        model_params.seed = seed[0]
+        model_params.seed = to_next_seed(trial)
         training_params = running.TrainingParams(**training_param_dict)
-        training_params.seed = seed[0] + 1
+        training_params.seed = model_params.seed + 1
         train_params = data.ContextWindowDataSetParams(**data_param_dict)
-        train_params.seed = seed[0] + 2
+        train_params.seed = model_params.seed + 2
         val_params = data.ContextWindowDataSetParams(**data_param_dict)
         eval_params = data.ContextWindowDataSetParams(**data_param_dict)
-        seed[0] += 3
-        for key, value in kwargs.items():
-            params_name = OPTIM_DICT[key][0]
-            if params_name == 'model':
+        if verbose:
+            print('Beginning trial:', end='')
+        for key in optim_params.to_optimize:
+            param_name, param_type, param_arg = OPTIM_DICT[key]
+            if param_type == 'uniform':
+                value = trial.suggest_uniform(key, *param_arg)
+            elif param_type == 'log_uniform':
+                value = trial.suggest_loguniform(key, *param_arg)
+            elif param_type == 'categorical':
+                value = trial.suggest_categorical(key, param_arg)
+            elif param_type == 'discrete_uniform':
+                value = trial.suggest_discrete_uniform(key, *param_arg)
+            else:
+                value = trial.suggest_int(key, *param_arg)
+            if verbose:
+                print('{}={},'.format(key, value), end='')
+            if param_name == 'model':
                 model_params.param.set_param(**{key: value})
-            elif params_name == 'training':
+            elif param_name == 'training':
                 training_params.param.set_param(**{key: value})
             else:
                 train_params.param.set_param(**{key: value})
                 val_params.param.set_param(**{key: value})
                 eval_params.param.set_param(**{key: value})
+        if verbose:
+            print('')
+        if trial.should_prune(0):
+            if verbose:
+                print('Pruning trial - Already seen')
+            raise optuna.structs.TrialPruned()
         if max_num_windows:
             bytes_estimate = models.estimate_total_size_bytes(
                 model_params, max_num_windows,
                 1 + train_params.context_left + train_params.context_right,
             )
-            too_big = (
-                bytes_estimate >
-                optim_params.model_estimate_memory_limit_bytes)
-        else:
-            too_big = False
+            if bytes_estimate > optim_params.model_estimate_memory_limit_bytes:
+                raise ValueError("Estimate size {}B exceeds limit {}B".format(
+                    bytes_estimate,
+                    optim_params.model_estimate_memory_limit_bytes))
         objectives = []
-        for _ in range(partitions_to_average):
+        for p_shift in range(partitions_to_average):
+            eval_partition = to_next_partition(trial) + p_shift
+            eval_partition %= num_partitions
             if verbose:
-                print('Testing on partition {}'.format(eval_idx[0]))
+                print('Evaluating on partition {}'.format(eval_partition))
             if device.type == 'cuda':
                 torch.cuda.empty_cache()
-            eval_subset_ids = set(partitions[eval_idx[0]])
+            eval_subset_ids = set(partitions[eval_partition])
             if val_partition:
-                val_idx = (eval_idx[0] - 1) % num_partitions
+                val_idx = (eval_partition - 1) % num_partitions
                 train_subset_ids = set(chain(*(
                     partitions[i] for i in range(num_partitions)
-                    if i not in {val_idx, eval_idx[0]}
+                    if i not in {val_idx, eval_partition}
                 )))
                 val_subset_ids = set(partitions[val_idx])
             else:
                 train_subset_ids = set(chain(*(
                     partitions[i] for i in range(num_partitions)
-                    if i != eval_idx[0]
+                    if i != eval_partition
                 )))
                 val_subset_ids = train_subset_ids
             if subset_ids:
@@ -306,103 +437,54 @@ def optimize_am(
             train_params.subset_ids = list(train_subset_ids)
             val_params.subset_ids = list(val_subset_ids)
             eval_params.subset_ids = list(eval_subset_ids)
-            model = eval_data = xent = float('nan')
-            try:
-                if too_big:
-                    raise ValueError("Model passed memory limit estimate")
-                model = running.train_am(
-                    model_params, training_params, data_dir, train_params,
-                    data_dir, val_params, weight=weight, device=device,
-                    train_num_data_workers=train_num_data_workers,
-                    print_epochs=verbose
-                )
-                eval_data = data.ContextWindowEvaluationDataLoader(
-                    data_dir, eval_params)
-                xent = running.get_am_alignment_cross_entropy(
-                    model, eval_data, device=device)
-            except KeyboardInterrupt:
-                raise
-            except Exception:
-                traceback.print_exc()
-                print('Exception was caught. Assigning bad loss')
-            finally:
-                if xent != xent:
-                    xent = optim_params.nan_or_failure_loss
-                objectives.append(xent)
-                del model, eval_data, xent
-            eval_idx[0] = to_next(eval_idx[0])
+
+            if not p_shift:
+                # only record intermediate results for the first partition
+                callbacks = tuple()
+            else:
+
+                def report_and_prune(dict_):
+                    trial.report(dict_['val_loss'], dict_['epoch'])
+                    if trial.should_prune(dict_['epoch']):
+                        raise optuna.structs.TrialPruned()
+                callbacks = (report_and_prune,)
+            model = running.train_am(
+                model_params, training_params, data_dir, train_params,
+                data_dir, val_params, weight=weight, device=device,
+                train_num_data_workers=train_num_data_workers,
+                print_epochs=verbose,
+                callbacks=callbacks
+            )
+            eval_data = data.ContextWindowEvaluationDataLoader(
+                data_dir, eval_params)
+            xent = running.get_am_alignment_cross_entropy(
+                model, eval_data, device=device)
+            objectives.append(xent)
+            del model, eval_data, xent
         mean = np.mean(objectives)
         if verbose:
             print('Mean loss: {:.02f}'.format(mean))
         return mean
-    wrapped = gpyopt.GPyOptObjectiveWrapper(objective)
-    if history_csv:
-        try:
-            _, Y = wrapped.read_history_to_X_Y(history_csv)
-            seed[0] = len(Y) * 3
-            for _ in range(len(Y)):
-                for _ in range(partitions_to_average):
-                    eval_idx[0] = to_next(eval_idx[0])
-        except IOError:
-            pass
-    # we add all possible optimizable parameters as fixed values. This way,
-    # those values will be recorded in the history csv AND constraints can
-    # use them
-    for key in OPTIM_DICT:
-        params_name = OPTIM_DICT[key][0]
-        if params_name == 'model':
-            wrapped.set_fixed_parameter(key, model_param_dict[key])
-        elif params_name == 'training':
-            wrapped.set_fixed_parameter(key, training_param_dict[key])
-        else:
-            wrapped.set_fixed_parameter(key, data_param_dict[key])
-    for param_name in optim_params.to_optimize:
-        param_type, param_constr = OPTIM_DICT[param_name][1:]
-        wrapped.set_variable_parameter(param_name, param_type, param_constr)
-    constraints = None
-    # if optim_params.model_estimate_memory_limit_bytes is not None:
-    #     # data_params.batch_size refers to the number of utterances, whereas
-    #     # our estimates are based on the number of windows. We'll iterate
-    #     # through the partition to determine the maximum utterance lengths,
-    #     # then use those to max bound the number of windows
-    #     if 'batch_size' in optim_params.to_optimize:
-    #         max_queue_size = OPTIM_DICT['batch_size'][2][1]
-    #     else:
-    #         max_queue_size = data_param_dict['batch_size']
-    #     sds = data.SpectDataSet(
-    #         data_dir, subset_ids=subset_ids if subset_ids else None)
-    #     queue = []
-    #     for feats, _ in sds:
-    #         if len(queue) < max_queue_size:
-    #             heapq.heappush(queue, len(feats))
-    #         else:
-    #             heapq.heappushpop(queue, len(feats))
-    #     max_num_windows = sum(queue)
-    #     del queue, sds, max_queue_size
-    #
-    #     def _memory_estimate_constraint(**kwargs):
-    #         model_params = models.AcousticModelParams(**model_param_dict)
-    #         training_params = running.TrainingParams(**training_param_dict)
-    #         data_params = data.ContextWindowDataSetParams(**data_param_dict)
-    #         for key, value in kwargs.items():
-    #             params_name = OPTIM_DICT[key][0]
-    #             if params_name == 'model':
-    #                 model_params.param.set_param(**{key: value})
-    #             elif params_name == 'training':
-    #                 training_params.param.set_param(**{key: value})
-    #             else:
-    #                 data_params.param.set_param(**{key: value})
-    #         bytes_estimate = models.estimate_total_size_bytes(
-    #             model_params, max_num_windows,
-    #             1 + data_params.context_left + data_params.context_right,
-    #         )
-    #         return (
-    #             bytes_estimate <=
-    #             optim_params.model_estimate_memory_limit_bytes
-    #         )
-    #     constraints = [_memory_estimate_constraint]
-    best = gpyopt.bayesopt(
-        wrapped, optim_params, history_csv, constraints=constraints)
+    if optim_params.max_samples is not None:
+        n_trials = optim_params.max_samples
+    else:
+        n_trials = float('inf')
+    # this strange loop manages the sampler's seeds and keeps the number of
+    # trials in the ballpark of max_samples when distributed
+    completed_trials = sum(
+        1 for trial in study.trials if trial.state.is_finished())
+    while completed_trials < n_trials:
+        # other_trials will only keep the seed consistent when not distributed
+        other_trials = len(study.trials) - running_discount
+        sampler.rng = np.random.RandomState(
+            optim_seed + other_trials)
+        if hasattr(sampler, 'random_sampler'):
+            sampler.random_sampler.rng = np.random.RandomState(
+                (optim_seed + other_trials) * 16319)
+        study.optimize(objective, n_trials=1)
+        completed_trials = sum(
+            1 for trial in study.trials if trial.state.is_finished())
+    best = study.best_params
     model_params = models.AcousticModelParams(**model_param_dict)
     training_params = running.TrainingParams(**training_param_dict)
     data_params = data.ContextWindowDataSetParams(**data_param_dict)

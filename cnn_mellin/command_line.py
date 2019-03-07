@@ -491,8 +491,9 @@ def _optimize_acoutic_model_parse_args(args):
         'lr decay, early stopping, etc. Instead, test data will be evaluated'
     )
     parser.add_argument(
-        '--history-csv', default=None,
-        help='Where to store intermediate results of the optimization'
+        '--history-url', default=None,
+        help='What database to store intermediate results to. If not set, '
+        'will be in-memory'
     )
     parser.add_argument(
         '--add-help-string', action='store_true', default=False,
@@ -511,6 +512,15 @@ def _optimize_acoutic_model_parse_args(args):
         'optimization will be restricted to. Optimized settings will be '
         'written back to this section'
     )
+    parser.add_argument(
+        '--agent-name', default=None,
+        help='A name assigned to the caller. If restarting after a SIGINT, '
+        'trial(s) will exist in the database with state RUNNING that are not '
+        'actually running anymore. If `agent_name` is set, trials whose '
+        '`agent_name` properties match `agent_name` and whose states are '
+        'RUNNING will bediscounted from seed and evalution partition '
+        'calculations, improving reproducibility (in the non-distributed case)'
+    )
     parser.add_argument('data_dir', help='Path to optimization data')
     parser.add_argument(
         'partitions', nargs='+',
@@ -520,7 +530,7 @@ def _optimize_acoutic_model_parse_args(args):
         'utterance ids, one per line, of each partition'
     )
     parser.add_argument(
-        'out_ini', type=argparse.FileType('w'),
+        'out_ini',
         help='Path to write the optimize config (INI) file to'
     )
     return parser.parse_args(args)
@@ -569,8 +579,9 @@ def optimize_acoustic_model(args=None):
         weight=weight_tensor,
         device=options.device,
         train_num_data_workers=options.train_num_data_workers,
-        history_csv=options.history_csv,
+        history_url=options.history_url,
         verbose=options.verbose,
+        agent_name=options.agent_name,
     )
     # only set the values that could have been optimized. This avoids weirdness
     # like setting the partition for individual data sets

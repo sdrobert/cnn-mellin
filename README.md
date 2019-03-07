@@ -301,9 +301,3 @@ _stepsext/train_acoustic_model.sh_. For example,
 `stepsext/train_acoustic_model.sh exp/matrix 1` trains the first trial listed
 in _exp/matrix_. Likewise, _stepsext/decode_acoustic_model.sh_ can be used to
 decode and score a trial.
-
-## Hyperparameter optimization
-
-Hyperparameter optimization is used to find an optimal set of model, data, and
-training parametersl hyperparameter optimization is not necessary for training
-or decoding with an acoustic model.

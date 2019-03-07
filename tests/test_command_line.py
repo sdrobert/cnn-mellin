@@ -305,7 +305,7 @@ def test_optimize_acoustic_model(temp_dir, populate_torch_dir):
     data_dir = os.path.join(temp_dir, 'data')
     in_ini = os.path.join(temp_dir, 'in.ini')
     out_ini = os.path.join(temp_dir, 'out.ini')
-    history_csv = os.path.join(temp_dir, 'history.csv')
+    history_db = os.path.join(temp_dir, 'history.db')
     utt_ids = sorted(populate_torch_dir(data_dir, 20, num_filts=3)[-1])
     with open(in_ini, 'w') as f:
         f.write(
@@ -338,7 +338,7 @@ def test_optimize_acoustic_model(temp_dir, populate_torch_dir):
     assert not command_line.optimize_acoustic_model([
         '--config', in_ini,
         '--device', 'cpu',
-        '--history-csv', history_csv,
+        '--history-url', 'sqlite:///' + history_db,
         data_dir,
         str(len(partitions)),
         out_ini
@@ -352,20 +352,8 @@ def test_optimize_acoustic_model(temp_dir, populate_torch_dir):
     assert batch_size != 30
     log10_lr_idx = lines.index('log10_learning_rate')
     log10_lr_line = lines[log10_lr_idx:].split('\n')[0]
-    log10_lr = int(log10_lr_line.split('=')[1].strip())
+    log10_lr = float(log10_lr_line.split('=')[1].strip())
     assert log10_lr != -300
-    found_batch_size, found_lr = False, False
-    with open(history_csv) as f:
-        for line_no, line in enumerate(f):
-            line = line.strip().split(',')
-            if not line_no:
-                log10_lr_idx = line.index('log10_learning_rate')
-                batch_size_idx = line.index('batch_size')
-            else:
-                cur_log10_lr = int(line[log10_lr_idx])
-                cur_batch_size = int(line[batch_size_idx])
-                found_batch_size |= cur_batch_size == batch_size
-                found_lr |= cur_log10_lr == log10_lr
     assert not command_line.optimize_acoustic_model([
         '--config', in_ini,
         '--device', 'cuda',

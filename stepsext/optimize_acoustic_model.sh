@@ -97,10 +97,11 @@ trial_dir_vars=(
 )
 optim_variables=(
   "optim_out_config"
-  "optim_history_csv"
+  "optim_history_url"
   "optim_partitions"
   "optim_use_val_partition"
   "optim_data_set"
+  "optim_agent"
 )
 unset_variables "${trial_dir_vars[@]}" "${optim_variables[@]}" "weight_file"
 . "${trial_dir}/variables"
@@ -138,7 +139,8 @@ fi
 optimize-acoustic-model \
   --config "${model_cfg}" \
   --device "${device}" \
-  --history-csv "${optim_history_csv}" \
+  --history-url "${optim_history_url}" \
+  --agent-name "${optim_agent}" \
   ${verbose} \
   ${no_optim_val_partition+--no-val-partition} \
   ${train_num_data_workers:+--train-num-data-workers "${train_num_data_workers}"} \

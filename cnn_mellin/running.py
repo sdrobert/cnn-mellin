@@ -182,7 +182,6 @@ def train_am_for_epoch(
         feats = feats.to(device, non_blocking=non_blocking)
         ali = ali.to(device, non_blocking=non_blocking)
         loss = loss_fn(model(feats), ali)
-        print(loss.item())
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -205,7 +204,8 @@ class TrainingParams(TrainingEpochParams, training.TrainingStateParams):
 def train_am(
         model_params, training_params, train_dir, train_params, val_dir,
         val_params, state_dir=None, state_csv=None, weight=None, device='cpu',
-        train_num_data_workers=os.cpu_count() - 1, print_epochs=True):
+        train_num_data_workers=os.cpu_count() - 1, print_epochs=True,
+        callbacks=tuple()):
     '''Train an acoustic model for multiple epochs
 
     Parameters
@@ -237,6 +237,17 @@ def train_am(
         number of CPUs available
     print_epochs : bool, optional
         Print the results of each epoch, and their timings, to stdout
+    callbacks: sequence, optional
+        A list of functions that accepts a dictionary as a positional argument,
+        containing:
+        - 'epoch': the current epoch
+        - 'train_loss': the training loss for the epoch
+        - 'val_loss': the validation loss for the epoch
+        - 'model': the model trained to this point
+        - 'optimizer': the optimizer at this point
+        - 'controller': the underlying training state controller
+        - 'will_stop': whether the controller thinks training should stop
+        The callback occurs after the controller has been updated for the epoch
 
     Returns
     -------
@@ -322,7 +333,20 @@ def train_am(
         if print_epochs:
             print('epoch {:03d} ({:.03f}s): train={:e} val={:e}'.format(
                 epoch, time.time() - epoch_start, train_loss, val_loss))
-        if not controller.update_for_epoch(
-                model, optimizer, train_loss, val_loss):
+        will_stop = not controller.update_for_epoch(
+            model, optimizer, train_loss, val_loss) or epoch == num_epochs
+        if callbacks:
+            callback_dict = {
+                'epoch': epoch,
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'model': model,
+                'optimizer': optimizer,
+                'controller': controller,
+                'will_stop': will_stop,
+            }
+            for callback in callbacks:
+                callback(callback_dict)
+        if will_stop:
             break
     return model
