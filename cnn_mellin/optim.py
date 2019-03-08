@@ -181,6 +181,13 @@ class CNNMellinOptimParams(param.Parameterized):
         doc='If set, median pruning will be enabled, and will begin after '
         'these many epochs. If unset, median pruning will be disabled'
     )
+    random_after_n_unsuccessful_trials = param.Integer(
+        5, bounds=(1, None), allow_None=True,
+        doc='If set, and there have been this many or more sequential '
+        'failed or pruned trials, sample the next trial randomly. This helps '
+        'avoid a non-random sampler getting caught in a situation where it '
+        'repeatedly samples infeasible points'
+    )
 
 
 def optimize_am(
@@ -354,7 +361,10 @@ def optimize_am(
                 heapq.heappush(queue, len(feats))
             else:
                 heapq.heappushpop(queue, len(feats))
-        max_num_windows = sum(queue)
+        max_num_windows = dict()
+        for batch_size in range(len(queue), 0, -1):
+            max_num_windows[batch_size] = sum(queue)
+            heapq.heappop(queue)
         del queue, sds, max_queue_size
     else:
         max_num_windows = None
@@ -401,7 +411,7 @@ def optimize_am(
             raise optuna.structs.TrialPruned()
         if max_num_windows:
             bytes_estimate = models.estimate_total_size_bytes(
-                model_params, max_num_windows,
+                model_params, max_num_windows[train_params.batch_size],
                 1 + train_params.context_left + train_params.context_right,
             )
             if bytes_estimate > optim_params.model_estimate_memory_limit_bytes:
@@ -474,14 +484,30 @@ def optimize_am(
     completed_trials = sum(
         1 for trial in study.trials if trial.state.is_finished())
     while completed_trials < n_trials:
+        all_trials = study.trials
         # other_trials will only keep the seed consistent when not distributed
-        other_trials = len(study.trials) - running_discount
+        other_trials = len(all_trials) - running_discount
         sampler.rng = np.random.RandomState(
             optim_seed + other_trials)
         if hasattr(sampler, 'random_sampler'):
             sampler.random_sampler.rng = np.random.RandomState(
                 (optim_seed + other_trials) * 16319)
+            if optim_params.random_after_n_unsuccessful_trials:
+                all_trials.sort(key=lambda trial: -trial.trial_id)
+                n_unsuccessful = 0
+                for trial in all_trials:
+                    if trial.state == optuna.structs.TrialState.RUNNING:
+                        continue
+                    if trial.state == optuna.structs.TrialState.COMPLETE:
+                        break
+                    n_unsuccessful += 1
+                if (
+                        n_unsuccessful >=
+                        optim_params.random_after_n_unsuccessful_trials):
+                    study.sampler = sampler.random_sampler
+        del all_trials
         study.optimize(objective, n_trials=1)
+        study.sampler = sampler
         completed_trials = sum(
             1 for trial in study.trials if trial.state.is_finished())
     best = study.best_params
