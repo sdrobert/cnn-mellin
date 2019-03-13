@@ -94,6 +94,22 @@ def _print_parameters_as_ini_parse_args(args):
         help='One or more INI files to populate parameters before printing '
         'all of them. Later config files clobber earlier set parameters'
     )
+    try:
+        import cnn_mellin.optim
+        parser.add_argument(
+            '--history-url', default=None,
+            help='If set, will clobber parameters with the best values found '
+            'from this optimization database'
+        )
+        parser.add_argument(
+            '--data-set-config-section',
+            choices=['train_data', 'val_data', 'pdfs_data'],
+            default='train_data',
+            help='What section to write data-set related parameters to if '
+            '--history-url has been set'
+        )
+    except ImportError:
+        pass
     parser.add_argument(
         '--add-help-string', action='store_true', default=False,
         help='If set, will include parameter help strings at the start of the '
@@ -123,6 +139,22 @@ def print_parameters_as_ini(args=None):
                 param.List: CommaListDeserializer(),
             },
         )
+    if hasattr(options, 'history_url') and options.history_url is not None:
+        from cnn_mellin.optim import OPTIM_DICT
+        import optuna
+        study = optuna.study.Study(
+            study_name=param_dict['optim'].study_name,
+            storage=options.history_url
+        )
+        for key, value in study.best_params.items():
+            param_name = OPTIM_DICT[key][0]
+            if param_name in {'model', 'training'}:
+                param_dict[param_name].param.set_param(**{key: value})
+            elif key in param_dict['data'].params():
+                param_dict['data'].param.set_param(**{key: value})
+            else:
+                param_dict[options.data_set_config_section].param.set_param(
+                    **{key: value})
     serial.serialize_to_ini(
         sys.stdout, param_dict,
         serializer_type_dict={
@@ -494,11 +526,6 @@ def _optimize_acoutic_model_parse_args(args):
         '--history-url', default=None,
         help='What database to store intermediate results to. If not set, '
         'will be in-memory'
-    )
-    parser.add_argument(
-        '--add-help-string', action='store_true', default=False,
-        help='If set, will include parameter help strings at the start of the '
-        'printout'
     )
     parser.add_argument(
         '--verbose', action='store_true', default=False,
