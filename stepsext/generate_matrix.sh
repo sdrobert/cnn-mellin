@@ -197,6 +197,7 @@ data_dir_vars=(
   "target_dim"
   "HCLG"
   "gmm_mdl"
+  "words"
   "log_prior"
   "train_data"
   "dev_data"

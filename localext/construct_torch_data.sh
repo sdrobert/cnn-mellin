@@ -10,6 +10,7 @@ train_ali_dir=exp/dnn4_pretrain-dbn_dnn_ali
 dev_ali_dir=exp/dnn4_pretrain-dbn_dnn_ali_dev
 gmm_mdl=exp/dnn4_pretrain-dbn_dnn/final.mdl
 HCLG=exp/tri3/graph/HCLG.fst
+words=exp/tri3/graph/words.txt
 help_message="Construct torch data dir from feats and alignments
 
 Usage: $0 [options] <kaldi-feat-dir> <torch-data-dir>
@@ -35,7 +36,9 @@ Options:
 --gmm-mdl PATH        : The path to a GMM-based topology file (final.mdl),
                         absolute or relative to --recipe-dir (deft: ${gmm_mdl})
 --HCLG PATH           : The path to a decoding weighted FST file (HCLG.fst),
-                        absolute or relative to --recipe-dir (def: ${HCLG})
+                        absolute or relative to --recipe-dir (deft: ${HCLG})
+--words PATH          : The path to the word-to-id dictionary (words.txt),
+                        absolute or relative to --recipe-dir (deft: ${words})
 "
 
 . parse_options.sh
@@ -65,7 +68,7 @@ done
 kaldi_data_dir="$(cd "${kaldi_data_dir}"; pwd -P)"
 
 all_recipe_files_absolute=true
-for f in "${train_ali_dir}" "${dev_ali_dir}" "${gmm_mdl}" "${HCLG}"; do
+for f in "${train_ali_dir}" "${dev_ali_dir}" "${gmm_mdl}" "${HCLG}" "${words}"; do
   if [[ "$f" = /* ]]; then
     if [ ! -e "$f" ]; then
       echo -e "File '$f' does not exist"
@@ -94,6 +97,7 @@ exist"
   dev_ali_dir="$(cd "${recipe_dir}"; cd "${dev_ali_dir}"; pwd -P)"
   gmm_mdl="$(cd "${recipe_dir}"; cd "$(dirname "${gmm_mdl}")"; pwd -P)/$(basename "${gmm_mdl}")"
   HCLG="$(cd "${recipe_dir}"; cd "$(dirname "${HCLG}")"; pwd -P)/$(basename "${HCLG}")"
+  words="$(cd "${recipe_dir}"; cd "$(dirname "${words}")"; pwd -P)/$(basename "${words}")"
 fi
 
 for d in "${train_ali_dir}" "${dev_ali_dir}"; do
@@ -173,6 +177,7 @@ done
 # the recipe in the other directory (whoops)
 cp "${gmm_mdl}" "${tmp}/torch/final.mdl"
 cp "${HCLG}" "${tmp}/torch/HCLG.fst"
+cp "${words}" "${tmp}/torch/words.txt"
 
 target_dim=$(hmm-info "${gmm_mdl}" | awk '/pdfs/ {print $4}')
 freq_dim=$(awk '$1 == "num_filts" {print $2}' "${tmp}/info.ark")
@@ -193,6 +198,7 @@ target_dim=${target_dim}
 freq_dim=${freq_dim}
 HCLG='${torch_data_dir}/HCLG.fst'
 gmm_mdl='${torch_data_dir}/final.mdl'
+words='${torch_data_dir}/words.txt'
 weight_file='${torch_data_dir}/weights.pt'
 log_prior='${torch_data_dir}/log_prior.pt'
 train_data='${torch_data_dir}/train'

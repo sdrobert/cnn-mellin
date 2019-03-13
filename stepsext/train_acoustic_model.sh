@@ -22,6 +22,7 @@ echo "$0 $*"
 
 device=
 train_num_data_workers=
+verbose=false
 help_message="Train an acoustic model from an experiment matrix
 
 Usage: $0 [options] (<trial-dir> | <matrix-file> <line>)
@@ -44,6 +45,7 @@ Options:
 --train-num-data-workers <INT> : The number of worker threads to spawn to
                                  handle loading training data. If unset, will
                                  use the train-acoustic-model default
+--verbose {true,false}
 "
 
 . parse_options.sh
@@ -72,6 +74,7 @@ trial_dir_vars=(
   "target_dim"
   "HCLG"
   "gmm_mdl"
+  "words"
   "log_prior"
   "train_data"
   "dev_data"
@@ -103,10 +106,17 @@ if [ -z "${device}" ]; then
   echo "Inferred device: ${device}"
 fi
 
+if $verbose ; then
+  verbose=--verbose
+else
+  verbose=
+fi
+
 train-acoustic-model \
   --config "${model_cfg}" \
   --device "${device}" \
   --state-csv "${state_csv}" \
+  ${verbose} \
   ${train_num_data_workers:+--train-num-data-workers "${train_num_data_workers}"} \
   ${weight_file:+--weight-tensor-file "${weight_file}"} \
   "${state_dir}" "${train_data}" "${dev_data}"

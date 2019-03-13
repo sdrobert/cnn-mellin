@@ -431,6 +431,9 @@ def _train_acoustic_model_parse_args(args):
         'expect training to halt or want to keep track of the loss'
     )
     parser.add_argument(
+        '--verbose', action='store_true', default=False,
+    )
+    parser.add_argument(
         'state_dir',
         help='Path to where model and optimizer states are stored'
     )
@@ -478,6 +481,7 @@ def train_acoustic_model(args=None):
         weight=weight_tensor,
         device=options.device,
         train_num_data_workers=options.train_num_data_workers,
+        print_epochs=options.verbose,
     )
     return 0
 

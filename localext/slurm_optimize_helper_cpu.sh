@@ -12,15 +12,20 @@ if [ ! -d exp/logs ]; then
   mkdir -p exp/logs
 fi
 
+if [ -z "${SLURM_ARRAY_TASK_ID}" ]; then
+  echo "Needs array" 1>&2
+  exit 1
+fi
+
 # this helps ensure not everyone is querying/creating the database at the same
 # time
-sleep ${SLURM_ARRAY_TASK_ID:-1}
+sleep ${SLURM_ARRAY_TASK_ID}
 
-trial_dir="$(sed "${SLURM_ARRAY_TASK_ID:-1}q;d" exp/matrix)"
+trial_dir="$(sed "${SLURM_ARRAY_TASK_ID}q;d" exp/matrix)"
 # name and trial num
 trial_name=$(basename "$(dirname "${trial_dir}")")_$(basename "${trial_dir}")
 
 stepsext/optimize_acoustic_model.sh \
   --verbose true \
   --device cpu \
-  "${trial_dir}" &>> "exp/logs/${trial_name}.log"
+  "${trial_dir}" &>> "exp/logs/optimize_${trial_name}.log"

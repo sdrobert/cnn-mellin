@@ -50,6 +50,7 @@ Options:
 --train-num-data-workers <INT> : The number of worker threads to spawn to
                                  handle loading training data. If unset, will
                                  use the train-acoustic-model default
+--verbose {true,false}
 "
 . parse_options.sh
 
@@ -77,6 +78,7 @@ trial_dir_vars=(
   "target_dim"
   "HCLG"
   "gmm_mdl"
+  "words"
   "log_prior"
   "train_data"
   "dev_data"

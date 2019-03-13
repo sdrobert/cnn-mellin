@@ -68,6 +68,7 @@ trial_dir_vars=(
   "target_dim"
   "HCLG"
   "gmm_mdl"
+  "words"
   "log_prior"
   "train_data"
   "dev_data"
@@ -120,11 +121,7 @@ for x in dev test; do
     -o bm \
     "${pdfs_dir}" "ark,scp:${pdfs_dir}/pdfs.ark,${pdfs_dir}/pdfs.scp"
   graph_dir="$(dirname "${HCLG}")"
-  if [ -f "${graph_dir}/words.txt" ]; then
-    words="${graph_dir}/words.txt"
-  fi
   # acoustic-scale is 1 because we re-scale in scoring
-  # ${words:+"--word-symbol-table=${words}"} #fixme \
   latgen-faster-mapped \
     --acoustic-scale=1.0 \
     "--min-active=${min_active}" \
@@ -132,6 +129,7 @@ for x in dev test; do
     "--max-mem=${max_mem}" \
     "--beam=${beam}" \
     "--lattice-beam=${lattice_beam}" \
+    "--word-symbol-table=${words}" \
     --allow-partial=true \
     "${gmm_mdl}" "${HCLG}" "scp:${pdfs_dir}/pdfs.scp" \
     "ark:|gzip -c > ${decode_dir}/lat.1.gz"
