@@ -99,48 +99,17 @@ an acoustic model
    ```
    Alternatively, you can use speaker-dependent FMLLR features from the DNN
    recipe (if you called _local/steps/run_dnn.sh_):
-7. Convert your kaldi feature and alignments to a format torch can use. Let's
-   say you're using _tri3_ alignments and the f-bank features from above. You
-   can combine them as follows:
+7. Convert your kaldi feature and alignments to a format torch can use. If
+   you're using the DNN alignments and f-bank features, you can try:
    ``` bash
-    for x in train dev test; do
-     mkdir -p data/torch/fbank/$x
-     write-table-to-torch-dir \
-      "ark:apply-cmvn 'scp:data/kaldi/fbank/$x/cmvn.scp' 'scp:data/kaldi/fbank/$x/feats.scp' ark:- |" \
-      data/torch/fbank/$x/feats
-    done
-    write-table-to-torch-dir \
-    -i iv -o long \
-    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/exp/tri3_ali/ali.*.gz |' ark:- |" \
-    data/torch/fbank/train/ali
-    write-table-to-torch-dir \
-    -i iv -o long \
-    "ark:ali-to-pdf ../s5/exp/tri3/final.mdl 'ark:gunzip -c ../s5/exp/tri3_ali_dev/ali.*.gz |' ark:- |" \
-    data/torch/fbank/dev/ali
-    get-torch-spect-data-dir-info --strict data/torch/fbank/dev /dev/null
-    get-torch-spect-data-dir-info --strict data/torch/fbank/test /dev/null
-    get-torch-spect-data-dir-info \
-    --strict data/torch/fbank/train data/torch/fbank/info.ark
-    num_targets=$(hmm-info ../s5/exp/tri3/final.mdl | awk '/pdfs/ {print $4}')
-    target-count-info-to-tensor \
-    --num-targets ${num_targets} \
-    data/torch/fbank/info.ark inv_weight data/torch/fbank/weights.pt
-    target-count-info-to-tensor \
-    --num-targets ${num_targets} \
-    data/torch/fbank/info.ark log_prior data/torch/fbank/log_prior.pt
-    echo "\
-target_dim=${num_targets}
-freq_dim=$(awk '$1 == "num_filts" {print $2}' data/torch/fbank/info.ark)
-HCLG='$(cd ../s5/exp/tri3/graph; pwd -P)/HCLG.fst'
-gmm_mdl='$(cd ../s5/exp/tri3; pwd -P)/final.mdl'
-weight_file='$(pwd -P)/data/torch/fbank/weights.pt'
-log_prior='$(pwd -P)/data/torch/fbank/log_prior.pt'
-train_data='$(pwd -P)/data/torch/fbank/train'
-dev_data='$(pwd -P)/data/torch/fbank/dev'
-test_data='$(pwd -P)/data/torch/fbank/test'
-dev_ref='$(pwd -P)/data/kaldi/fbank/dev'
-test_ref='$(pwd -P)/data/kaldi/fbank/test'
-    " > data/torch/fbank/variables
+   localext/construct_torch_data.sh data/kaldi/fbank data/torch/fbank
+   ```
+   For _tri3_ alignments with the above Gammatones, try
+   ``` bash
+   localext/construct_torch_data.sh \
+    --train-ali-dir exp/tri3_ali \
+    --dev-ali-dir exp/tri3_ali_dev \
+    data/kaldi/tonebank data/torch/tonebank
    ```
    The process is the same for any combination of features and alignments
    (assuming the number of alignment frames and feature frames match).
