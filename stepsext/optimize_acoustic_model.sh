@@ -110,8 +110,8 @@ if ! check_variables_are_set "${optim_variables[@]}" ; then
   echo "\
 Unable to find optimization variables (such as ${optim_variables[0]}) in
 '${trial_dir}/variables'. This likely means you called
-stepsext/generate_matrix.sh without first having installed pydrobert-gpyopt.
-Try 'pip install pydrobert-gpyopt'" 1>&2
+stepsext/generate_matrix.sh without first having installed optuna.
+Try 'pip install optuna'" 1>&2
   exit 1
 fi
 
@@ -146,3 +146,5 @@ optimize-acoustic-model \
   ${train_num_data_workers:+--train-num-data-workers "${train_num_data_workers}"} \
   ${weight_file:+--weight-tensor-file "${weight_file}"} \
   "${data_dir}" "${optim_partitions[@]}" "${optim_out_config}"
+
+echo "Optimized configuration stored at '${optim_out_config}'"

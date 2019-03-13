@@ -124,8 +124,8 @@ for x in dev test; do
     words="${graph_dir}/words.txt"
   fi
   # acoustic-scale is 1 because we re-scale in scoring
+  # ${words:+"--word-symbol-table=${words}"} #fixme \
   latgen-faster-mapped \
-    ${words:+"--word-symbol-table=${words}"} \
     --acoustic-scale=1.0 \
     "--min-active=${min_active}" \
     "--max-active=${max_active}" \

@@ -17,6 +17,7 @@ function unset_variables() {
 }
 
 [ -f path.sh ] && . path.sh
+echo "$0 $*"
 
 exp_dir=exp
 num_trials=10
