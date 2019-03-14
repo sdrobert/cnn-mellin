@@ -28,8 +28,11 @@ def test_read_and_write_print_parameters_as_ini(capsys, temp_dir):
     s = capsys.readouterr()
     assert s.out.find('[data]') != -1
     a_ini = s.out[s.out.find('[model]'):s.out.find('[training]')]
-    # this doesn't replace the original number, just appends 1000
-    a_ini = a_ini.replace('num_conv = ', 'num_conv = 1000')
+    # this doesn't replace the original value, just appends to it
+    a_ini = a_ini.replace(
+        'kernel_sizes = ',
+        'kernel_sizes = (1000, 1000, 1), '
+    )
     a_ini = a_ini.replace('time_factor = ', 'time_factor = 1000')
     with open(os.path.join(temp_dir, 'a.ini'), 'w') as f:
         f.write(a_ini + '\n')
@@ -42,7 +45,7 @@ def test_read_and_write_print_parameters_as_ini(capsys, temp_dir):
     ])
     s = capsys.readouterr()
     assert s.out.find('[data]') != -1
-    assert s.out.find('num_conv = 1000') != -1
+    assert s.out.find('kernel_sizes = (1000, 1000, 1), ') != -1
     assert s.out.find('time_factor = 1000') == -1
     assert s.out.find('time_factor = 30') != -1
 
@@ -235,8 +238,8 @@ def test_train_acoustic_model(temp_dir, populate_torch_dir):
             '[model]\n'
             'freq_dim = 3\n'
             'target_dim = 11\n'
-            'num_fc = 1\n'
-            'num_conv = 0\n'
+            'hidden_sizes = \n'
+            'kernel_sizes = \n'
             'seed = 1\n'
             '[data]\n'
             'context_left = 1\n'
@@ -270,8 +273,8 @@ def test_train_acoustic_model(temp_dir, populate_torch_dir):
             '[model]\n'
             'freq_dim = 3\n'
             'target_dim = 11\n'
-            'num_fc = 1\n'
-            'num_conv = 0\n'
+            'hidden_sizes = \n'
+            'kernel_sizes = \n'
             'seed = 1\n'
             '[data]\n'
             'context_left = 1\n'
@@ -312,8 +315,8 @@ def test_optimize_acoustic_model(temp_dir, populate_torch_dir):
             '[model]\n'
             'freq_dim = 3\n'
             'target_dim = 11\n'
-            'num_fc = 1\n'
-            'num_conv = 0\n'
+            'hidden_sizes = \n'
+            'kernel_sizes = \n'
             '[data]\n'
             'context_left = 0\n'
             'context_right = 0\n'

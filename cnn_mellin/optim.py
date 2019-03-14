@@ -22,47 +22,6 @@ __email__ = "sdrobert@cs.toronto.edu"
 __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2019 Sean Robertson"
 
-OPTIM_DICT = {
-    'nonlinearity': ('model', 'categorical', ('relu', 'sigmoid', 'tanh')),
-    'flatten_style':
-        ('model', 'categorical', ('keep_filts', 'keep_chans', 'keep_both')),
-    'init_num_channels': ('model', 'int', (1, 64)),
-    'mellin': ('model', 'categorical', (True, False)),
-    'kernel_freq': ('model', 'int', (1, 10)),
-    'factor_sched': ('model', 'int', (1, 2)),
-    'kernel_time': ('model', 'int', (1, 10)),
-    'freq_factor': ('model', 'int', (1, 4)),
-    'mconv_decimation_strategy':
-        ('model', 'categorical', (
-            "pad-then-dec", "pad-to-dec-time-floor", "pad-to-dec-time-ceil")),
-    'channels_factor': ('model', 'int', (1, 4)),
-    'num_fc': ('model', 'int', (1, 3)),
-    'num_conv': ('model', 'int', (0, 3)),
-    'hidden_size': ('model', 'categorical', (512, 1024, 2048)),
-    'dropout2d_on_conv': ('model', 'categorical', (True, False)),
-    'time_factor': ('model', 'int', (1, 4)),
-    'early_stopping_threshold': ('training', 'uniform', (0.0, 0.5)),
-    'early_stopping_patience': ('training', 'int', (1, 10)),
-    'early_stopping_burnin': ('training', 'int', (0, 10)),
-    'reduce_lr_threshold': ('training', 'uniform', (0.0, 0.5)),
-    'reduce_lr_factor': ('training', 'log_uniform', (0.1, 0.5)),
-    'reduce_lr_patience': ('training', 'int', (1, 10)),
-    'reduce_lr_cooldown': ('training', 'int', (0, 10)),
-    'reduce_lr_log10_epsilon': ('training', 'uniform', (-10, -2)),
-    'reduce_lr_burnin': ('training', 'discrete', (0, 10)),
-    'dropout_prob': ('training', 'log_uniform', (1e-5, 0.5)),
-    'weight_decay': ('training', 'log_uniform', (1e-5, 0.5)),
-    'num_epochs': ('training', 'int', (5, 30)),
-    'log10_learning_rate': ('training', 'uniform', (-10, -3)),
-    'optimizer':
-        ('training', 'categorical', ('adam', 'adadelta', 'adagrad', 'sgd')),
-    'weigh_training_samples': ('training', 'categorical', (True, False)),
-    'context_left': ('data_set', 'int', (0, 10)),
-    'context_right': ('data_set', 'int', (0, 10)),
-    'batch_size': ('data_set', 'int', (5, 20)),
-    'reverse': ('data_set', 'categorical', (True, False)),
-}
-
 
 # this is inspired by Yusuke's class here:
 # https://github.com/Minyus/optkeras/blob/1ccd3ba89cfa9bdf973f73045111eeae1060c3c5/optkeras/optkeras.py#L318
@@ -122,9 +81,69 @@ class ChainOrPruner(optuna.pruners.BasePruner):
         return False
 
 
+OPTIM_BOUNDS = {
+    'factor_sched': (1, 100),
+    'freq_factor': (1, 4),
+    'num_fc': (0, 5),
+    'num_conv': (0, 10),
+    'time_factor': (1, 4),
+    'early_stopping_threshold': (1e-5, 0.5),
+    'early_stopping_patience': (1, 10),
+    'early_stopping_burnin': (0, 10),
+    'reduce_lr_threshold': (1e-5, 0.5),
+    'reduce_lr_factor': (0.1, 0.5),
+    'reduce_lr_cooldown': (0, 10),
+    'reduce_lr_log10_epsilon': (-10, -2),
+    'reduce_lr_burnin': (0, 10),
+    'dropout_prob': (0.0, 0.5),
+    'weight_decay': (1e-5, 0.5),
+    'num_epochs': (5, 30),
+    'log10_learning_rate': (-10, -3),
+    'context_left': (0, 20),
+    'context_right': (0, 20),
+    'batch_size': (5, 20),
+    'kernel_time': (1, 10),
+    'kernel_freq': (1, 10),
+    'kernel_cout': (1, 512),
+    'hidden_size': (1, 2048),
+}
+
+OPTIM_SOURCES = {
+    'nonlinearity': 'model',
+    'flatten_style': 'model',
+    'mellin': 'model',
+    'factor_sched': 'model',
+    'freq_factor': 'model',
+    'mconv_decimation_strategy': 'model',
+    'dropout2d_on_conv': 'model',
+    'time_factor': 'model',
+    'kernel_sizes': 'model',
+    'hidden_sizes': 'model',
+    'early_stopping_threshold': 'training',
+    'early_stopping_patience': 'training',
+    'early_stopping_burnin': 'training',
+    'reduce_lr_threshold': 'training',
+    'reduce_lr_factor': 'training',
+    'reduce_lr_patience': 'training',
+    'reduce_lr_cooldown': 'training',
+    'reduce_lr_log10_epsilon': 'training',
+    'reduce_lr_burnin': 'training',
+    'dropout_prob': 'training',
+    'weight_decay': 'training',
+    'num_epochs': 'training',
+    'log10_learning_rate': 'training',
+    'optimizer': 'training',
+    'weigh_training_samples': 'training',
+    'context_left': 'data_set',
+    'context_right': 'data_set',
+    'batch_size': 'data_set',
+    'reverse': 'data_set',
+}
+
+
 class CNNMellinOptimParams(param.Parameterized):
     to_optimize = param.ListSelector(
-        [], objects=list(OPTIM_DICT),
+        [], objects=list(OPTIM_SOURCES),
         doc='A list of hyperparameters to optimize with a call to '
         'optimize-acoustic-model'
     )
@@ -262,7 +281,8 @@ def optimize_am(
     parameters. Seeds are dynamically incremented for each retraining.
     '''
     if optim_params.seed is None:
-        optim_seed = np.random.randint(1000000000)
+        # maximum is 2 ** 32 - 1, but we do some prime number wiggling
+        optim_seed = np.random.randint(2 ** 16 - 1)
     else:
         optim_seed = optim_params.seed
     if verbose:
@@ -350,7 +370,7 @@ def optimize_am(
         # through the partition to determine the maximum utterance lengths,
         # then use those to max bound the number of windows
         if 'batch_size' in optim_params.to_optimize:
-            max_queue_size = OPTIM_DICT['batch_size'][2][1]
+            max_queue_size = OPTIM_BOUNDS['batch_size'][1]
         else:
             max_queue_size = data_param_dict['batch_size']
         sds = data.SpectDataSet(
@@ -379,45 +399,16 @@ def optimize_am(
         train_params.seed = model_params.seed + 2
         val_params = data.ContextWindowDataSetParams(**data_param_dict)
         eval_params = data.ContextWindowDataSetParams(**data_param_dict)
+        _write_params_from_objective_trial(
+            trial, optim_params.to_optimize, model_params,
+            training_params, train_params, val_params, eval_params,
+            max_num_windows, optim_params.model_estimate_memory_limit_bytes)
         if verbose:
-            print('Beginning trial:', end='')
-        for key in optim_params.to_optimize:
-            param_name, param_type, param_arg = OPTIM_DICT[key]
-            if param_type == 'uniform':
-                value = trial.suggest_uniform(key, *param_arg)
-            elif param_type == 'log_uniform':
-                value = trial.suggest_loguniform(key, *param_arg)
-            elif param_type == 'categorical':
-                value = trial.suggest_categorical(key, param_arg)
-            elif param_type == 'discrete_uniform':
-                value = trial.suggest_discrete_uniform(key, *param_arg)
-            else:
-                value = trial.suggest_int(key, *param_arg)
-            if verbose:
-                print('{}={},'.format(key, value), end='')
-            if param_name == 'model':
-                model_params.param.set_param(**{key: value})
-            elif param_name == 'training':
-                training_params.param.set_param(**{key: value})
-            else:
-                train_params.param.set_param(**{key: value})
-                val_params.param.set_param(**{key: value})
-                eval_params.param.set_param(**{key: value})
-        if verbose:
-            print('')
+            print('Beginning trial: ', trial.params)
         if trial.should_prune(0):
             if verbose:
                 print('Pruning trial - Already seen')
             raise optuna.structs.TrialPruned()
-        if max_num_windows:
-            bytes_estimate = models.estimate_total_size_bytes(
-                model_params, max_num_windows[train_params.batch_size],
-                1 + train_params.context_left + train_params.context_right,
-            )
-            if bytes_estimate > optim_params.model_estimate_memory_limit_bytes:
-                raise ValueError("Estimate size {}B exceeds limit {}B".format(
-                    bytes_estimate,
-                    optim_params.model_estimate_memory_limit_bytes))
         objectives = []
         for p_shift in range(partitions_to_average):
             eval_partition = to_next_partition(trial) + p_shift
@@ -510,17 +501,266 @@ def optimize_am(
         study.sampler = sampler
         completed_trials = sum(
             1 for trial in study.trials if trial.state.is_finished())
-    best = study.best_params
     model_params = models.AcousticModelParams(**model_param_dict)
     training_params = running.TrainingParams(**training_param_dict)
-    data_params = data.ContextWindowDataSetParams(**data_param_dict)
-    weigh_training_samples = None
-    for key, value in best.items():
-        params_name = OPTIM_DICT[key][0]
-        if params_name == 'model':
-            model_params.param.set_param(**{key: value})
-        elif params_name == 'training':
-            training_params.param.set_param(**{key: value})
-        else:
-            data_params.param.set_param(**{key: value})
-    return model_params, training_params, data_params
+    data_set_params = data.ContextWindowDataSetParams(**data_param_dict)
+    write_trial_params_to_parameterizeds(
+        study.best_params, model_params, training_params, data_set_params)
+    return model_params, training_params, data_set_params
+
+
+def write_trial_params_to_parameterizeds(
+        trial_params, model_params, training_params, data_set_params):
+    '''Write optuna trial parameters to model/training parameterized configs
+
+    Parameters
+    ----------
+    trial_params : dict
+        A dictionary of parameters from an optimization Optuna study (a call to
+        ``optimize_am``). For example, given
+        ``isinstance(study, optuna.study.Study)``, ``study.best_params`` would
+        be suitable
+    model_params : AcousticModelParams
+        Where to store model parameters from `trial_params`
+    training_params : TrainingParams
+        Where to store training parameters from `trial_params`
+    data_set_params : pydrobert.torch.data.ContextWindowDataSetParams
+        Where to store data set parameters from `trial_params`
+    '''
+    for key, value in trial_params.items():
+        if key in OPTIM_SOURCES:
+            source = OPTIM_SOURCES[key]
+            if key == 'num_conv':
+                kernel_sizes = []
+                for layer_idx in range(value):
+                    kernel_sizes.append((
+                        trial_params['kw_{}'.format(layer_idx)],
+                        trial_params['kh_{}'.format(layer_idx)],
+                        trial_params['co_{}'.format(layer_idx)],
+                    ))
+                model_params.kernel_sizes = kernel_sizes
+            elif key == 'num_fc':
+                hidden_sizes = []
+                for layer_idx in range(value):
+                    hidden_sizes.append(
+                        trial_params['hidden_{}'.format(layer_idx)])
+                model_params.hidden_sizes = hidden_sizes
+            elif source == 'model':
+                model_params.param.set_param(key, value)
+            elif source == 'training':
+                training_params.param.set_param(key, value)
+            else:
+                data_set_params.param.set_param(key, value)
+
+
+def _write_params_from_objective_trial(
+        trial, to_optimize, model_params,
+        training_params, train_params, val_params, eval_params,
+        max_num_windows, model_limit_bytes):
+    # this ugly piece of crap is called during optimization. There are so
+    # many conditionals because it isn't necessary to sample many parameters
+    # unless some other condition is met. Fortunately, optuna (i.e. TPE) allows
+    # for this
+    to_optimize = set(to_optimize)
+    if 'early_stopping_threshold' in to_optimize:
+        training_params.early_stopping_threshold = trial.suggest_loguniform(
+            'early_stopping_threshold',
+            *OPTIM_BOUNDS['early_stopping_threshold'])
+    if 'reduce_lr_threshold' in to_optimize:
+        training_params.reduce_lr_threshold = trial.suggest_loguniform(
+            'reduce_lr_threshold', *OPTIM_BOUNDS['reduce_lr_threshold'])
+    if 'weight_decay' in to_optimize:
+        training_params.weight_decay = trial.suggest_loguniform(
+            'weight_decay', *OPTIM_BOUNDS['weight_decay'])
+    if 'num_epochs' in to_optimize:
+        training_params.num_epochs = trial.suggest_int(
+            'num_epochs', *OPTIM_BOUNDS['num_epochs'])
+    if 'log10_learning_rate' in to_optimize:
+        training_params.log10_learning_rate = trial.suggest_uniform(
+            'log10_learning_rate', *OPTIM_BOUNDS['log10_learning_rate'])
+    if 'weigh_training_samples' in to_optimize:
+        training_params.weigh_training_samples = trial.suggest_categorical(
+            'weigh_training_samples', (True, False))
+    if 'context_left' in to_optimize:
+        train_params.context_left = \
+            val_params.context_left = \
+            eval_params.context_left = trial.suggest_int(
+                'context_left', *OPTIM_BOUNDS['context_left'])
+    if 'context_right' in to_optimize:
+        train_params.context_right = \
+            val_params.context_right = \
+            eval_params.context_right = trial.suggest_int(
+                'context_right', *OPTIM_BOUNDS['context_right'])
+    if 'batch_size' in to_optimize:
+        train_params.batch_size = \
+            val_params.batch_size = \
+            eval_params.batch_size = trial.suggest_int(
+                'batch_size', *OPTIM_BOUNDS['batch_size'])
+    if 'reverse' in to_optimize:
+        train_params.reverse = \
+            val_params.reverse = \
+            eval_params.reverse = trial.suggest_categorical(
+                'reverse', (True, False))
+    if training_params.early_stopping_threshold:
+        # we want these parameters to sample from min_ to not occurring,
+        # but not have multiple values for not occurring
+        if 'early_stopping_burnin' in to_optimize:
+            min_, max_ = OPTIM_BOUNDS['early_stopping_burnin']
+            max_ = min(max_, training_params.num_epochs - 1)
+            if min_ <= max_:
+                training_params.early_stopping_burnin = trial.suggest_int(
+                    'early_stopping_burnin', min_, max_)
+        if 'early_stopping_patience' in to_optimize:
+            min_, max_ = OPTIM_BOUNDS['early_stopping_patience']
+            max_ = min(
+                max_,
+                training_params.num_epochs -
+                training_params.early_stopping_burnin - 1)
+            if min_ <= max_:
+                training_params.early_stopping_patience = trial.suggest_int(
+                    'early_stopping_patience', min_, max_)
+    if training_params.reduce_lr_threshold:
+        if 'reduce_lr_factor' in to_optimize:
+            training_params.reduce_lr_factor = trial.suggest_loguniform(
+                'reduce_lr_factor', *OPTIM_BOUNDS['reduce_lr_factor'])
+        if 'reduce_lr_log10_epsilon' in to_optimize:
+            training_params.reduce_lr_log10_epsilon = trial.suggest_uniform(
+                'reduce_lr_log10_epsilon',
+                *OPTIM_BOUNDS['reduce_lr_log10_epsilon'])
+        if 'reduce_lr_burnin' in to_optimize:
+            min_, max_ = OPTIM_BOUNDS['reduce_lr_burnin']
+            max_ = min(max_, training_params.num_epochs)
+            if min_ <= max_:
+                training_params.reduce_lr_burnin = trial.suggest_int(
+                    'reduce_lr_burnin', min_, max_)
+        if 'reduce_lr_patience' in to_optimize:
+            min_, max_ = OPTIM_BOUNDS['reduce_lr_patience']
+            max_ = min(
+                max_,
+                training_params.num_epochs - training_params.reduce_lr_burnin)
+            if min_ <= max_:
+                training_params.reduce_lr_patience = trial.suggest_int(
+                    'reduce_lr_patience', min_, max_)
+        if 'reduce_lr_cooldown' in to_optimize:
+            min_, max_ = OPTIM_BOUNDS['reduce_lr_cooldown']
+            max_ = min(
+                max_,
+                training_params.num_epochs -
+                training_params.reduce_lr_burnin -
+                2 * training_params.reduce_lr_patience)
+            if min_ <= max:
+                training_params.reduce_lr_cooldown = trial.suggest_int(
+                    'reduce_lr_cooldown', min_, max_)
+    if 'kernel_sizes' in to_optimize:
+        num_conv = trial.suggest_int('num_conv', *OPTIM_BOUNDS['num_conv'])
+        model_params.kernel_sizes = [(
+            OPTIM_BOUNDS['kernel_time'][0],
+            OPTIM_BOUNDS['kernel_freq'][0],
+            OPTIM_BOUNDS['kernel_cout'][0])] * num_conv
+        optimize_kernel_sizes = True
+    else:
+        num_conv = len(model_params.kernel_sizes)
+        optimize_kernel_sizes = False
+    if 'hidden_sizes' in to_optimize:
+        num_fc = trial.suggest_int('num_fc', *OPTIM_BOUNDS['num_fc'])
+        model_params.hidden_sizes = [OPTIM_BOUNDS['hidden_size'][0]] * num_fc
+        optimize_hidden_sizes = True
+    else:
+        num_fc = len(model_params.hidden_sizes)
+        optimize_hidden_sizes = False
+    if num_conv + num_fc:
+        if 'nonlinearity' in to_optimize:
+            training_params.nonlinearity = trial.suggest_categorical(
+                'nonlinearity', ('relu', 'sigmoid', 'tanh'))
+        if 'dropout_prob' in to_optimize:
+            training_params.dropout_prob = trial.suggest_uniform(
+                'dropout_prob', *OPTIM_BOUNDS['dropout_prob'])
+    if num_conv:
+        if 'flatten_style' in to_optimize:
+            model_params.flatten_style = trial.suggest_categorical(
+                'flatten_style', ('keep_chans', 'keep_both'))
+        if 'mellin' in to_optimize:
+            model_params.mellin = trial.suggest_categorical(
+                'mellin', (True, False))
+        if model_params.mellin and 'mconv_decimation_strategy' in to_optimize:
+            model_params.mconv_decimation_strategy = trial.suggest_categorical(
+                'mconv_decimation_strategy', (
+                    "pad-then-dec",
+                    "pad-to-dec-time-floor",
+                    "pad-to-dec-time-ceil",
+                )
+            )
+        if 'factor_sched' in to_optimize:
+            min_, max_ = OPTIM_BOUNDS['factor_sched']
+            max_ = min(max_, num_conv)
+            if min_ <= max_:
+                model_params.factor_sched = trial.suggest_int(
+                    'factor_sched', min_, max_)
+        if model_params.factor_sched:
+            if 'freq_factor' in to_optimize:
+                model_params.freq_factor = trial.suggest_int(
+                    'freq_factor', *OPTIM_BOUNDS['freq_factor'])
+            if 'time_factor' in to_optimize:
+                model_params.time_factor = trial.suggest_int(
+                    'time_factor', *OPTIM_BOUNDS['time_factor'])
+        if 'dropout2d_on_conv' in to_optimize:
+            model_params.dropout2d_on_conv = trial.suggest_categorical(
+                'dropout2d_on_conv', *OPTIM_BOUNDS['dropout2d_on_conv'])
+    cw_size = 1 + train_params.context_left + train_params.context_right
+    if model_limit_bytes is not None:
+        bytes_estimate = models.estimate_total_size_bytes(
+            model_params, max_num_windows[train_params.batch_size], cw_size)
+        if bytes_estimate > model_limit_bytes:
+            raise ValueError("Estimate size {}B exceeds limit {}B".format(
+                bytes_estimate, model_limit_bytes))
+    if optimize_kernel_sizes:
+        for layer_idx in range(num_conv):
+            kw, kh, co = model_params.kernel_sizes[layer_idx]
+            min_, max_ = OPTIM_BOUNDS['kernel_cout']
+            if model_limit_bytes is not None:
+                while True:
+                    model_params.kernel_sizes[layer_idx] = (kw, kh, max_)
+                    bytes_estimate = models.estimate_total_size_bytes(
+                        model_params, max_num_windows[train_params.batch_size],
+                        cw_size)
+                    if bytes_estimate <= model_limit_bytes:
+                        break
+                    max_ = (min_ + max_) // 2
+            co = trial.suggest_int('co_{}'.format(layer_idx), min_, max_)
+            min_, max_ = OPTIM_BOUNDS['kernel_freq']
+            if model_limit_bytes is not None:
+                while True:
+                    model_params.kernel_sizes[layer_idx] = (kw, max_, co)
+                    bytes_estimate = models.estimate_total_size_bytes(
+                        model_params, max_num_windows[train_params.batch_size],
+                        cw_size)
+                    if bytes_estimate <= model_limit_bytes:
+                        break
+                    max_ = (min_ + max_) // 2
+            kh = trial.suggest_int('kh_{}'.format(layer_idx), min_, max_)
+            min_, max_ = OPTIM_BOUNDS['kernel_time']
+            if model_limit_bytes is not None:
+                while True:
+                    model_params.kernel_sizes[layer_idx] = (max_, kh, co)
+                    bytes_estimate = models.estimate_total_size_bytes(
+                        model_params, max_num_windows[train_params.batch_size],
+                        cw_size)
+                    if bytes_estimate <= model_limit_bytes:
+                        break
+                    max_ = (min_ + max_) // 2
+            kw = trial.suggest_int('kw_{}'.format(layer_idx), min_, max_)
+            model_params.kernel_sizes[layer_idx] = (kw, kh, co)
+    if optimize_hidden_sizes:
+        for layer_idx in range(num_fc):
+            min_, max_ = OPTIM_BOUNDS['hidden_size']
+            if model_limit_bytes is not None:
+                while True:
+                    model_params.hidden_sizes[layer_idx] = max_
+                    bytes_estimate = models.estimate_total_size_bytes(
+                        model_params, max_num_windows[train_params.batch_size],
+                        cw_size)
+                    if bytes_estimate <= model_limit_bytes:
+                        break
+                    max_ = (min_ + max_) // 2
+            model_params.hidden_sizes[layer_idx] = trial.suggest_int(
+                'hidden_{}'.format(layer_idx), min_, max_)

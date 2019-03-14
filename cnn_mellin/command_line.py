@@ -21,6 +21,8 @@ import cnn_mellin.models as models
 import cnn_mellin.running as running
 import torch
 
+from cnn_mellin import TupleList
+
 __author__ = "Sean Robertson"
 __email__ = "sdrobert@cs.toronto.edu"
 __license__ = "Apache 2.0"
@@ -50,17 +52,80 @@ class CommaListSerializer(serial.DefaultSerializer):
 
     def serialize(self, name, parameterized):
         val = super(CommaListSerializer, self).serialize(name, parameterized)
-        return ','.join(str(x) for x in val)
+        return ', '.join(str(x) for x in val)
 
 
-class CommaListDeserializer(serial.DefaultDeserializer):
+class CommaTupleListSerializer(serial.DefaultSerializer):
+    def help_string(self, name, parameterized):
+        return (
+            'elements are separated by commas. An element is a tuple, which '
+            'is a bracketed, comma-delimited list'
+        )
+
+    def serialize(self, name, parameterized):
+        val = super(CommaTupleListSerializer, self).serialize(
+            name, parameterized)
+        return ', '.join(
+            '(' + ', '.join(str(xx) for xx in x) + ')'
+            for x in val
+        )
+
+
+class CommaListDeserializer(serial.DefaultListDeserializer):
     def deserialize(self, name, block, parameterized):
-        if block == '':
+        if block.strip() == '':
             block = []
         else:
-            block = block.split(',')
-        super(CommaListDeserializer, self).deserialize(
-            name, block, parameterized)
+            p = parameterized.params()[name]
+            try:
+                if p.class_:
+                    block = [
+                        p.class_(x.strip(), *self.args, **self.kwargs)
+                        for x in block.split(',')
+                    ]
+                else:
+                    block = [x.strip() for x in block.split(',')]
+            except (TypeError, ValueError) as e:
+                raise_from(ParamConfigTypeError(parameterized, name), e)
+        parameterized.param.set_param(name, block)
+
+
+class CommaTupleListDeserializer(serial.DefaultListDeserializer):
+    def deserialize(self, name, block, parameterized):
+        if block.strip() == '':
+            block = []
+        else:
+            p = parameterized.params()[name]
+            try:
+                new_block = []
+                new_tuple = None
+                for x in block.split(','):
+                    x = x.strip()
+                    append = False
+                    while x.startswith('('):
+                        if new_tuple is not None:
+                            raise ValueError('nested parentheses not allowed')
+                        x = x[1:].strip()
+                        new_tuple = []
+                    while x.endswith(')'):
+                        if new_tuple is None or append:
+                            raise ValueError(
+                                'closing parenthesis without open')
+                        x = x[:-1].strip()
+                        append = True
+                    if new_tuple is None:
+                        raise ValueError(
+                            'Found element {} , but not in tuple'.format(x))
+                    if p.class_:
+                        x = p.class_(x, *self.args, **self.kwargs)
+                    new_tuple.append(x)
+                    if append:
+                        new_block.append(tuple(new_tuple))
+                        new_tuple = None
+                block = new_block
+            except (TypeError, ValueError) as e:
+                raise_from(ParamConfigTypeError(parameterized, name), e)
+        parameterized.param.set_param(name, block)
 
 
 class CommaListSelectorSerializer(serial.DefaultListSelectorSerializer):
@@ -72,15 +137,15 @@ class CommaListSelectorSerializer(serial.DefaultListSelectorSerializer):
     def serialize(self, name, parameterized):
         val = super(CommaListSelectorSerializer, self).serialize(
             name, parameterized)
-        return ','.join(str(x) for x in val)
+        return ', '.join(str(x) for x in val)
 
 
 class CommaListSelectorDeserializer(serial.DefaultListSelectorDeserializer):
     def deserialize(self, name, block, parameterized):
-        if block == '':
+        if block.strip() == '':
             block = []
         else:
-            block = block.split(',')
+            block = [x.strip() for x in block.split(',')]
         super(CommaListSelectorDeserializer, self).deserialize(
             name, block, parameterized)
 
@@ -137,29 +202,47 @@ def print_parameters_as_ini(args=None):
             deserializer_type_dict={
                 param.ListSelector: CommaListSelectorDeserializer(),
                 param.List: CommaListDeserializer(),
+                TupleList: CommaTupleListDeserializer(),
             },
         )
     if hasattr(options, 'history_url') and options.history_url is not None:
-        from cnn_mellin.optim import OPTIM_DICT
         import optuna
         study = optuna.study.Study(
             study_name=param_dict['optim'].study_name,
             storage=options.history_url
         )
-        for key, value in study.best_params.items():
-            param_name = OPTIM_DICT[key][0]
-            if param_name in {'model', 'training'}:
-                param_dict[param_name].param.set_param(**{key: value})
-            elif key in param_dict['data'].params():
-                param_dict['data'].param.set_param(**{key: value})
-            else:
-                param_dict[options.data_set_config_section].param.set_param(
-                    **{key: value})
+        data_set_params = data.ContextWindowDataSetParams(
+            name='data_set',
+            **param.param_union(
+                options.config['data'],
+                options.config[options.data_set_config_section],
+            )
+        )
+        optimization_candidates = set(
+            options.config['optim'].params()['to_optimize'].objects)
+        write_trial_params_to_parameterizeds(
+            study.best_params,
+            options.config['model'],
+            options.config['training'],
+            data_set_params,
+        )
+        for config_params, optimized_params in (
+                (options.config['model'], optins.config['model']),
+                (options.config['data'], data_set_params),
+                (
+                    options.config[options.data_set_config_section],
+                    data_set_params),
+                (options.config['training'], options.config['training'])):
+            for param_name in config_params.param.params().keys():
+                if param_name in optimization_candidates:
+                    config_params.param.set_param(
+                        **{param_name: getattr(optimized_params, param_name)})
     serial.serialize_to_ini(
         sys.stdout, param_dict,
         serializer_type_dict={
             param.ListSelector: CommaListSelectorSerializer(),
-            param.List: CommaListSerializer()
+            param.List: CommaListSerializer(),
+            TupleList: CommaTupleListSerializer(),
         },
         include_help=options.add_help_string
     )
@@ -277,6 +360,7 @@ def _acoustic_model_forward_pdfs_parse_args(args):
         deserializer_type_dict={
             param.ListSelector: CommaListSelectorDeserializer(),
             param.List: CommaListDeserializer(),
+            TupleList: CommaTupleListDeserializer(),
         },
     )
     parser.add_argument(
@@ -402,6 +486,7 @@ def _train_acoustic_model_parse_args(args):
         deserializer_type_dict={
             param.ListSelector: CommaListSelectorDeserializer(),
             param.List: CommaListDeserializer(),
+            TupleList: CommaTupleListDeserializer(),
         },
     )
     parser.add_argument(
@@ -499,6 +584,7 @@ def _optimize_acoutic_model_parse_args(args):
         deserializer_type_dict={
             param.ListSelector: CommaListSelectorDeserializer(),
             param.List: CommaListDeserializer(),
+            TupleList: CommaTupleListDeserializer(),
         },
     )
     parser.add_argument(
@@ -551,6 +637,11 @@ def _optimize_acoutic_model_parse_args(args):
         '`agent_name` properties match `agent_name` and whose states are '
         'RUNNING will bediscounted from seed and evalution partition '
         'calculations, improving reproducibility (in the non-distributed case)'
+    )
+    parser.add_argument(
+        '--add-help-string', action='store_true', default=False,
+        help='If set, will include parameter help strings at the start of the '
+        'printout'
     )
     parser.add_argument('data_dir', help='Path to optimization data')
     parser.add_argument(
@@ -616,20 +707,23 @@ def optimize_acoustic_model(args=None):
     )
     # only set the values that could have been optimized. This avoids weirdness
     # like setting the partition for individual data sets
+    optimization_candidates = set(
+        options.config['optim'].params()['to_optimize'].objects)
     for config_params, optimized_params in (
             (options.config['model'], model_params),
             (options.config['data'], data_set_params),
             (options.config[options.data_set_config_section], data_set_params),
             (options.config['training'], training_params)):
         for param_name in config_params.param.params().keys():
-            if param_name in optim.OPTIM_DICT:
+            if param_name in optimization_candidates:
                 config_params.param.set_param(
                     **{param_name: getattr(optimized_params, param_name)})
     serial.serialize_to_ini(
         options.out_ini, options.config,
         serializer_type_dict={
             param.ListSelector: CommaListSelectorSerializer(),
-            param.List: CommaListSerializer()
+            param.List: CommaListSerializer(),
+            TupleList: CommaTupleListSerializer(),
         },
         include_help=options.add_help_string
     )

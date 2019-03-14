@@ -34,8 +34,8 @@ def test_optimize_am(
     base_model_params = models.AcousticModelParams(
         freq_dim=5,
         target_dim=11,
-        num_conv=0,
-        num_fc=1,
+        kernel_sizes=[],
+        hidden_sizes=[],
     )
     base_training_params = running.TrainingParams(
         num_epochs=2,
