@@ -31,10 +31,11 @@ class RepeatPruner(optuna.pruners.BasePruner):
     '''Prune if we've already tried those parameters'''
     def prune(self, storage, study_id, trial_id, step):
         cur_trial = storage.get_trial(trial_id)
+        cur_trial_number = cur_trial.number
         agent_name = cur_trial.user_attrs.get('agent_name', float('nan'))
         trials = storage.get_all_trials(study_id)
         for trial in trials:
-            if trial.trial_id == trial_id:
+            if trial.number == cur_trial_number:
                 continue
             if (
                     trial.state == optuna.structs.TrialState.RUNNING and
@@ -347,21 +348,21 @@ def optimize_am(
             n_startup_trials=optim_params.initial_design_samples,
             n_warmup_steps=optim_params.median_pruner_epoch_warmup,
         ))
-    running_discount = sum(
-        1 for trial in study.trials
+    running_trials = [
+        trial for trial in study.trials
         if trial.state == optuna.structs.TrialState.RUNNING and
         trial.user_attrs.get('agent_name', float('nan')) == agent_name
-    )
+    ]
 
     def to_next_seed(trial):
-        return ((trial.trial_id - running_discount) * 44893) % 49811
+        return (trial.number * 44893) % 49811
 
     def to_next_partition(trial):
         return num_partitions - 1
     if optim_params.partition_style == 'round-robin':
 
         def to_next_partition(trial):
-            return (trial.trial_id - running_discount) % num_partitions
+            return trial.number % num_partitions
     elif optim_params.partition_style == 'average':
         partitions_to_average = num_partitions
     if optim_params.model_estimate_memory_limit_bytes is not None:
@@ -391,12 +392,15 @@ def optimize_am(
 
     def objective(trial):
         trial.set_user_attr('agent_name', agent_name)
+        # we do this in case we're restarting a trial after a sigint
+        trial_seed = trial.user_attrs.get('trial_seed', to_next_seed(trial))
+        trial.set_user_attr('trial_seed', trial_seed)
         model_params = models.AcousticModelParams(**model_param_dict)
-        model_params.seed = to_next_seed(trial)
+        model_params.seed = trial_seed
         training_params = running.TrainingParams(**training_param_dict)
-        training_params.seed = model_params.seed + 1
+        training_params.seed = trial_seed + 1
         train_params = data.ContextWindowDataSetParams(**data_param_dict)
-        train_params.seed = model_params.seed + 2
+        train_params.seed = trial_seed + 2
         val_params = data.ContextWindowDataSetParams(**data_param_dict)
         eval_params = data.ContextWindowDataSetParams(**data_param_dict)
         _write_params_from_objective_trial(
@@ -467,23 +471,79 @@ def optimize_am(
             print('Mean loss: {:.02f}'.format(mean))
         return mean
     if optim_params.max_samples is not None:
-        n_trials = optim_params.max_samples
+        max_trials = optim_params.max_samples
     else:
-        n_trials = float('inf')
-    # this strange loop manages the sampler's seeds and keeps the number of
-    # trials in the ballpark of max_samples when distributed
-    completed_trials = sum(
-        1 for trial in study.trials if trial.state.is_finished())
-    while completed_trials < n_trials:
-        all_trials = study.trials
-        # other_trials will only keep the seed consistent when not distributed
-        other_trials = len(all_trials) - running_discount
+        max_trials = float('inf')
+    # first finish all trials left running after sigint
+    for frozen_trial in running_trials:
+        trial_id = frozen_trial.trial_id
+        trial = optuna.trial.Trial(study, trial_id)
+        try:
+            result = objective(trial)
+        except optuna.structs.TrialPruned as e:
+            message = 'Setting status of trial#{} as {}. {}'.format(
+                trial_number, optuna.structs.TrialState.PRUNED, str(e))
+            study.logger.info(message)
+            study.storage.set_trial_state(
+                trial_id, optuna.structs.TrialState.PRUNED)
+            continue
+        except Exception as e:
+            message = (
+                'Setting status of trial#{} as {} because of the following '
+                'error: {}'.format(
+                    frozen_trial.trial_id,
+                    optuna.structs.TrialState.FAIL, repr(e)))
+            study.logger.warning(message, exc_info=True)
+            study.storage.set_trial_state(
+                trial_id, optuna.structs.TrialState.FAIL)
+            study.storage.set_trial_system_attr(
+                trial_id, 'fail_reason', message)
+            continue
+        try:
+            result = float(result)
+        except (ValueError, TypeError):
+            message = (
+                'Setting status of trial#{} as {} because the returned value '
+                'from the objective function cannot be casted to float. '
+                'Returned value is: {}'.format(
+                    trial_id, optuna.structs.TrialState.FAIL, repr(result)))
+            study.logger.warning(message)
+            study.storage.set_trial_state(
+                trial_id, optuna.structs.TrialState.FAIL)
+            study.storage.set_trial_system_attr(
+                trial_id, 'fail_reason', message)
+            continue
+        if result != result:
+            message = (
+                'Setting status of trial#{} as {} because the objective '
+                'function returned {}.'.format(
+                    trial_id, optuna.structs.TrialState.FAIL, result))
+            study.logger.warning(message)
+            study.storage.set_trial_state(
+                trial_id, optuna.structs.TrialState.FAIL)
+            study.storage.set_trial_system_attr(
+                trial_id, 'fail_reason', message)
+            continue
+        trial.report(result)
+        study.storage.set_trial_state(
+            trial_id, optuna.structs.TrialState.COMPLETE)
+    del running_trials
+    # we assume that all other agents will likewise finish their running
+    # trials
+    n_trials = study.storage.get_n_trials(study.study_id)
+    completed_trials = n_trials - study.storage.get_n_trials(
+        study.study_id,  state=optuna.structs.TrialState.FAIL)
+    completed_trials -= study.storage.get_n_trials(
+        study.study_id, state=optuna.structs.TrialState.RUNNING)
+    while completed_trials < max_trials:
+        # n_trials will only keep the seed consistent when not distributed
         sampler.rng = np.random.RandomState(
-            optim_seed + other_trials)
+            optim_seed + n_trials)
         if hasattr(sampler, 'random_sampler'):
             sampler.random_sampler.rng = np.random.RandomState(
-                (optim_seed + other_trials) * 16319)
+                (optim_seed + n_trials) * 16319)
             if optim_params.random_after_n_unsuccessful_trials:
+                all_trials = study.trials
                 all_trials.sort(key=lambda trial: -trial.trial_id)
                 n_unsuccessful = 0
                 for trial in all_trials:
@@ -496,11 +556,14 @@ def optimize_am(
                         n_unsuccessful >=
                         optim_params.random_after_n_unsuccessful_trials):
                     study.sampler = sampler.random_sampler
-        del all_trials
+                del all_trials
         study.optimize(objective, n_trials=1)
         study.sampler = sampler
-        completed_trials = sum(
-            1 for trial in study.trials if trial.state.is_finished())
+        n_trials = study.storage.get_n_trials(study.study_id)
+        completed_trials = n_trials - study.storage.get_n_trials(
+            study.study_id,  state=optuna.structs.TrialState.FAIL)
+        completed_trials -= study.storage.get_n_trials(
+            study.study_id, state=optuna.structs.TrialState.RUNNING)
     model_params = models.AcousticModelParams(**model_param_dict)
     training_params = running.TrainingParams(**training_param_dict)
     data_set_params = data.ContextWindowDataSetParams(**data_param_dict)
