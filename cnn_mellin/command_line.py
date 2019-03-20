@@ -207,6 +207,7 @@ def print_parameters_as_ini(args=None):
         )
     if hasattr(options, 'history_url') and options.history_url is not None:
         import optuna
+        from cnn_mellin.optim import write_trial_params_to_parameterizeds
         study = optuna.study.Study(
             study_name=param_dict['optim'].study_name,
             storage=options.history_url
@@ -214,25 +215,23 @@ def print_parameters_as_ini(args=None):
         data_set_params = data.ContextWindowDataSetParams(
             name='data_set',
             **param.param_union(
-                options.config['data'],
-                options.config[options.data_set_config_section],
+                param_dict['data'],
+                param_dict[options.data_set_config_section],
             )
         )
         optimization_candidates = set(
-            options.config['optim'].params()['to_optimize'].objects)
+            param_dict['optim'].params()['to_optimize'].objects)
         write_trial_params_to_parameterizeds(
             study.best_params,
-            options.config['model'],
-            options.config['training'],
+            param_dict['model'],
+            param_dict['training'],
             data_set_params,
         )
         for config_params, optimized_params in (
-                (options.config['model'], optins.config['model']),
-                (options.config['data'], data_set_params),
+                (param_dict['data'], data_set_params),
                 (
-                    options.config[options.data_set_config_section],
-                    data_set_params),
-                (options.config['training'], options.config['training'])):
+                    param_dict[options.data_set_config_section],
+                    data_set_params)):
             for param_name in config_params.param.params().keys():
                 if param_name in optimization_candidates:
                     config_params.param.set_param(

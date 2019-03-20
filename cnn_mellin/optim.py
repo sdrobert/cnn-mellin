@@ -439,7 +439,7 @@ def optimize_am(
             val_params.subset_ids = list(val_subset_ids)
             eval_params.subset_ids = list(eval_subset_ids)
 
-            if not p_shift:
+            if p_shift:
                 # only record intermediate results for the first partition
                 callbacks = tuple()
             else:

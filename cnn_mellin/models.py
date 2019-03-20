@@ -296,9 +296,14 @@ def _get_conv_config(params, window):
             rw = (pw(layer_idx) + 1) * prev_w - 1
             rw //= kw(layer_idx) + dw(layer_idx) - 1
             rw = cur_w - rw - 1
-            sh = prev_h - (dh(layer_idx) - 1) * (kh(layer_idx) - 1) // cur_h
+            # we don't have rh before calculating sh. Below assumes rh is going
+            # to pad however much is necessary to get (kh - 1) in the
+            # numerator, hence ph - dh * (kh - 1) => -(dh - 1) * (kh - 1)
+            sh = prev_h - (dh(layer_idx) - 1) * (kh(layer_idx) - 1) - 1
+            sh //= cur_h
             sh += 1
             rh = prev_h + ph(layer_idx) - dh(layer_idx) * (kh(layer_idx) - 1)
+            rh -= 1
             rh //= sh
             rh = cur_h - rh - 1
             return cur_w, cur_h, {
