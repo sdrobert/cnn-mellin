@@ -125,7 +125,7 @@ class TrainingEpochParams(param.Parameterized):
 
 def train_am_for_epoch(
         model, data_loader, optimizer, params,
-        epoch=None, device='cpu', weight=None):
+        epoch=None, device='cpu', weight=None, batch_callbacks=tuple()):
     '''Train an acoustic model for one epoch using cross-entropy loss
 
     Parameters
@@ -147,6 +147,10 @@ def train_am_for_epoch(
         Relative weights to assign to each class.
         `params.weigh_training_samples` must also be ``True`` to use during
         training
+    batch_callbacks : sequence, optional
+        A sequence of callbacks to perform after every batch. Callbacks should
+        accept two positional arguments: one for the batch number, the other
+        for the batch training loss
 
     Returns
     -------
@@ -182,11 +186,14 @@ def train_am_for_epoch(
         feats = feats.to(device, non_blocking=non_blocking)
         ali = ali.to(device, non_blocking=non_blocking)
         loss = loss_fn(model(feats), ali)
-        epoch_loss += loss.item()
+        loss_val = loss.item()
+        epoch_loss += loss_val
         loss.backward()
         optimizer.step()
-        total_batches += 1
         del feats, ali, loss
+        for callback in batch_callbacks:
+            callback(total_batches, loss_val)
+        total_batches += 1
     return epoch_loss / total_batches
 
 
@@ -205,7 +212,7 @@ def train_am(
         model_params, training_params, train_dir, train_params, val_dir,
         val_params, state_dir=None, state_csv=None, weight=None, device='cpu',
         train_num_data_workers=os.cpu_count() - 1, print_epochs=True,
-        callbacks=tuple()):
+        batch_callbacks=tuple(), epoch_callbacks=tuple()):
     '''Train an acoustic model for multiple epochs
 
     Parameters
@@ -231,13 +238,17 @@ def train_am(
         Relative weights to assign to each class.
         `train_params.weigh_training_samples` must also be ``True`` to use
         during training
-    train_num_data_workers: int, optional
+    train_num_data_workers : int, optional
         The number of worker threads to spawn to serve training data. 0 means
         data are served on the main thread. The default is one fewer than the
         number of CPUs available
     print_epochs : bool, optional
         Print the results of each epoch, and their timings, to stdout
-    callbacks: sequence, optional
+    batch_callbacks : sequence, optional
+        A sequence of functions that accepts two positional arguments: the
+        first is a batch index; the second is the batch loss. The functions
+        are called after a batch's loss has been propagated
+    epoch_callbacks : sequence, optional
         A list of functions that accepts a dictionary as a positional argument,
         containing:
         - 'epoch': the current epoch
@@ -322,7 +333,8 @@ def train_am(
             training_params,
             epoch=epoch,
             device=device,
-            weight=weight
+            weight=weight,
+            batch_callbacks=batch_callbacks,
         )
         val_loss = get_am_alignment_cross_entropy(
             model,
@@ -335,7 +347,7 @@ def train_am(
                 epoch, time.time() - epoch_start, train_loss, val_loss))
         will_stop = not controller.update_for_epoch(
             model, optimizer, train_loss, val_loss) or epoch == num_epochs
-        if callbacks:
+        if epoch_callbacks:
             callback_dict = {
                 'epoch': epoch,
                 'train_loss': train_loss,
@@ -345,7 +357,7 @@ def train_am(
                 'controller': controller,
                 'will_stop': will_stop,
             }
-            for callback in callbacks:
+            for callback in epoch_callbacks:
                 callback(callback_dict)
         if will_stop:
             break

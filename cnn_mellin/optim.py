@@ -48,26 +48,6 @@ class RepeatPruner(optuna.pruners.BasePruner):
         return False
 
 
-class TimerPruner(optuna.pruners.BasePruner):
-    '''Prune if a step exceeds some wall clock time threshold'''
-
-    def __init__(self, seconds):
-        super(TimerPruner, self).__init__()
-        self.seconds = seconds
-
-    def prune(self, storage, study_id, trial_id, step):
-        stamp = time()
-        trial = storage.get_trial(trial_id)
-        stamps = trial.user_attrs.get('intermediate_timestamps', [])
-        stamps.append(stamp)
-        storage.set_trial_user_attr(
-            trial_id, 'intermediate_timestamps', stamps)
-        if len(stamps) == 1:
-            return False
-        prev_stamp = stamps[-2]
-        return abs(stamp - prev_stamp) > self.seconds
-
-
 class ChainOrPruner(optuna.pruners.BasePruner):
     '''Prune if one of any passed pruners tells us to'''
 
@@ -333,15 +313,7 @@ def optimize_am(
         study_name=optim_params.study_name,
         sampler=sampler,
         load_if_exists=True,
-        pruner=ChainOrPruner([
-            RepeatPruner(),
-            # we always include the TimerPruner, even if disabled, so we can
-            # record the epoch-wise time to completion
-            TimerPruner(
-                float('inf') if optim_params.max_time_per_epoch is None
-                else optim_params.max_time_per_epoch
-            ),
-        ])
+        pruner=ChainOrPruner([RepeatPruner()])
     )
     if optim_params.median_pruner_epoch_warmup is not None:
         study.pruner.pruners.append(optuna.pruners.MedianPruner(
@@ -445,20 +417,35 @@ def optimize_am(
 
             if p_shift:
                 # only record intermediate results for the first partition
-                callbacks = tuple()
+                epoch_callbacks = batch_callbacks = tuple()
             else:
+                timeout = optim_params.max_time_per_epoch
+                if timeout is None:
+                    timeout = float('inf')
+
+                def check_no_timeout(batch_idx, loss):
+                    start = trial.user_attrs['epoch_start']
+                    now = time()
+                    if abs(now - start) > timeout:
+                        raise ValueError(
+                            'Training time exceeded max of {:.2f}s'
+                            ''.format(timeout))
 
                 def report_and_prune(dict_):
+                    trial.set_user_attr('epoch_start', time())
                     trial.report(dict_['val_loss'], dict_['epoch'])
                     if trial.should_prune(dict_['epoch']):
                         raise optuna.structs.TrialPruned()
-                callbacks = (report_and_prune,)
+                batch_callbacks = (check_no_timeout,)
+                epoch_callbacks = (report_and_prune,)
+                trial.set_user_attr('epoch_start', time())
             model = running.train_am(
                 model_params, training_params, data_dir, train_params,
                 data_dir, val_params, weight=weight, device=device,
                 train_num_data_workers=train_num_data_workers,
                 print_epochs=verbose,
-                callbacks=callbacks
+                batch_callbacks=batch_callbacks,
+                epoch_callbacks=epoch_callbacks,
             )
             eval_data = data.ContextWindowEvaluationDataLoader(
                 data_dir, eval_params)
