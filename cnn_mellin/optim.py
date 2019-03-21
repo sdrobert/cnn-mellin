@@ -23,31 +23,6 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2019 Sean Robertson"
 
 
-# this is inspired by Yusuke's class here:
-# https://github.com/Minyus/optkeras/blob/1ccd3ba89cfa9bdf973f73045111eeae1060c3c5/optkeras/optkeras.py#L318
-# We also prune repeats when they've failed or been pruned, as well as the
-# "running" ones that were interrupted
-class RepeatPruner(optuna.pruners.BasePruner):
-    '''Prune if we've already tried those parameters'''
-    def prune(self, storage, study_id, trial_id, step):
-        cur_trial = storage.get_trial(trial_id)
-        cur_trial_number = cur_trial.number
-        agent_name = cur_trial.user_attrs.get('agent_name', float('nan'))
-        trials = storage.get_all_trials(study_id)
-        for trial in trials:
-            if trial.number == cur_trial_number:
-                continue
-            if (
-                    trial.state == optuna.structs.TrialState.RUNNING and
-                    (
-                        trial.user_attrs.get('agent_name', float('nan')) ==
-                        agent_name)):
-                continue
-            if trial.params == cur_trial.params:
-                return True
-        return False
-
-
 class ChainOrPruner(optuna.pruners.BasePruner):
     '''Prune if one of any passed pruners tells us to'''
 
@@ -313,7 +288,7 @@ def optimize_am(
         study_name=optim_params.study_name,
         sampler=sampler,
         load_if_exists=True,
-        pruner=ChainOrPruner([RepeatPruner()])
+        pruner=ChainOrPruner([])
     )
     if optim_params.median_pruner_epoch_warmup is not None:
         study.pruner.pruners.append(optuna.pruners.MedianPruner(
@@ -381,10 +356,11 @@ def optimize_am(
             max_num_windows, optim_params.model_estimate_memory_limit_bytes)
         if verbose:
             print('Beginning trial: ', trial.params)
-        if trial.should_prune(0):
-            if verbose:
-                print('Pruning trial - Already seen')
-            raise optuna.structs.TrialPruned()
+        for other_trial in study.trials:
+            if (
+                    other_trial.number != trial.number and
+                    other_trial.params == trial.params):
+                raise ValueError('Trial params match previous')
         objectives = []
         for p_shift in range(partitions_to_average):
             eval_partition = to_next_partition(trial) + p_shift
