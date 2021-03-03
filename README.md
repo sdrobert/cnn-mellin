@@ -112,7 +112,9 @@ an acoustic model
     data/kaldi/tonebank data/torch/tonebank
    ```
    The process is the same for any combination of features and alignments
-   (assuming the number of alignment frames and feature frames match).
+   (assuming the number of alignment frames and feature frames match). The
+   script is in _localext_ because it uses defaults specific to TIMIT, but
+   the logic could presumably be ported to any Kaldi recipe
 8. Construct an experiment matrix (see below)
 9. Train the models (see below)
 10. Run the forward step on the test partition (see below)
@@ -270,3 +272,22 @@ _stepsext/train_acoustic_model.sh_. For example,
 `stepsext/train_acoustic_model.sh exp/matrix 1` trains the first trial listed
 in _exp/matrix_. Likewise, _stepsext/decode_acoustic_model.sh_ can be used to
 decode and score a trial.
+
+## Advanced: hyperparameter optimization
+When the python package [Optuna](https://optuna.org/) has been installed,
+_stepsext/generate_matrix.sh_ and _cnn-mellin_ behave slightly differently.
+_print-parameters-as-ini_ reports an additional section, ``[optim]``, which
+is used in the command _optimize-acoustic-model_. A key parameter in the
+section is a comma-delimited list called ``to_optimize``. Any parameter listed
+in this section (a subset of those listed in other sections of the config)
+will be jointly optimized in a call to _optimize-acoustic-model_. Those that
+are not listed take the (fixed) values from the remaining sections of the
+config. For example
+``` bash
+optimize-acoustic-model \
+  --config conf/anoptim.ini \
+  --history-url 'sqlite:///history.db' \
+  data/torch/fbank \
+  4 conf/optimized_model.ini
+```
+The optimizer would use the config file

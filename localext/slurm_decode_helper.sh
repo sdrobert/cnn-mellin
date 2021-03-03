@@ -17,9 +17,13 @@ if [ -z "${SLURM_ARRAY_TASK_ID}" ]; then
   exit 1
 fi
 
+echo "What is happening?"
+
 trial_dir="$(sed "${SLURM_ARRAY_TASK_ID}q;d" exp/matrix)"
 # name and trial num
 trial_name=$(basename "$(dirname "${trial_dir}")")_$(basename "${trial_dir}")
+
+echo "${trial_dir} ${trial_name}"
 
 stepsext/decode_acoustic_model.sh \
   --device cuda \

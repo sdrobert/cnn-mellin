@@ -1,0 +1,13 @@
+#! /usr/bin/env bash
+root_dirs=( $(find -L "${1:-exp}" -name decode_dev -execdir pwd -P \;) )
+for root in "${root_dirs[@]}"; do
+  best_dev=$(echo "${root}/decode_dev" > /dev/null && grep Sum "$root/decode_dev/"score_*/*.sys 2>/dev/null | utils/best_wer.sh)
+  echo "${best_dev}"
+  best_dev_score=$(basename "$(dirname "${best_dev##*|}")")
+  if [ -d "${root}/decode_test/${best_dev_score}" ]; then
+    grep Sum "${root}/decode_test/${best_dev_score}/"*.sys /dev/null | utils/best_wer.sh
+  fi
+done
+exit 0
+
+# you can combine with localext/stats.py. E.g.

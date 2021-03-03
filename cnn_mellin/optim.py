@@ -47,6 +47,7 @@ OPTIM_BOUNDS = {
     'early_stopping_patience': (1, 10),
     'early_stopping_burnin': (0, 10),
     'reduce_lr_threshold': (1e-5, 0.5),
+    'reduce_lr_patience': (1, 10),
     'reduce_lr_factor': (0.1, 0.5),
     'reduce_lr_cooldown': (0, 10),
     'reduce_lr_log10_epsilon': (-10, -2),
@@ -94,6 +95,8 @@ OPTIM_SOURCES = {
     'context_right': 'data_set',
     'batch_size': 'data_set',
     'reverse': 'data_set',
+    'num_conv': 'model',
+    'num_fc': 'model',
 }
 
 
@@ -445,7 +448,7 @@ def optimize_am(
             result = objective(trial)
         except optuna.structs.TrialPruned as e:
             message = 'Setting status of trial#{} as {}. {}'.format(
-                trial_number, optuna.structs.TrialState.PRUNED, str(e))
+                frozen_trial.number, optuna.structs.TrialState.PRUNED, str(e))
             study.logger.info(message)
             study.storage.set_trial_state(
                 trial_id, optuna.structs.TrialState.PRUNED)
@@ -454,7 +457,7 @@ def optimize_am(
             message = (
                 'Setting status of trial#{} as {} because of the following '
                 'error: {}'.format(
-                    frozen_trial.trial_id,
+                    frozen_trial.number,
                     optuna.structs.TrialState.FAIL, repr(e)))
             study.logger.warning(message, exc_info=True)
             study.storage.set_trial_state(
@@ -674,7 +677,7 @@ def _write_params_from_objective_trial(
                 training_params.num_epochs -
                 training_params.reduce_lr_burnin -
                 2 * training_params.reduce_lr_patience)
-            if min_ <= max:
+            if min_ <= max_:
                 training_params.reduce_lr_cooldown = trial.suggest_int(
                     'reduce_lr_cooldown', min_, max_)
     if 'kernel_sizes' in to_optimize:

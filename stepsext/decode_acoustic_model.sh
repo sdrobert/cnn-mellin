@@ -21,6 +21,7 @@ function unset_variables() {
 echo "$0 $*"
 
 device=
+torch_dir_mixin=
 help_message="Decode and score an acoustic model from an experiment matrix
 
 Usage: $0 [options] (<trial-dir> | <matrix-file> <line>)
@@ -40,6 +41,9 @@ Options:
 --device <STR>                 : A torch device string, such as 'cpu' or
                                  'cuda:1'. If unset, 'cuda' will be used if
                                  pytorch can access a GPU, otherwise 'cpu'
+--torch-dir-mixin PATH         : To decode using a different feature set. This
+                                 only impacts the features used. The topology,
+                                 words, etc, remain the same
 "
 
 . parse_options.sh
@@ -56,6 +60,32 @@ if [ $# = 1 ]; then
   trial_dir="$1"
 else
   trial_dir="$(sed "${2}q;d" "$1")"
+fi
+
+if [ ! -z "${torch_dir_mixin}" ]; then
+  if [ ! -f "${torch_dir_mixin}/variables" ]; then
+    echo "No file '${torch_dir_mixin}/variables'" 1>&2
+    exit 1
+  fi
+  data_dir_vars=(
+    "freq_dim"
+    "target_dim"
+    "HCLG"
+    "gmm_mdl"
+    "words"
+    "log_prior"
+    "train_data"
+    "dev_data"
+    "test_data"
+    "dev_ref"
+    "test_ref"
+  )
+  unset_variables "${data_dir_vars[@]}"
+  . "${torch_dir_mixin}/variables"
+  check_variables_are_set "${data_dir_vars[@]}"
+  dev_data_mixin="${dev_data}"
+  test_data_mixin="${test_data}"
+  freq_dim_mixin="${freq_dim}"
 fi
 
 if [ ! -f "${trial_dir}/variables" ]; then
@@ -91,6 +121,17 @@ unset_variables "${trial_dir_vars[@]}"
 . "${trial_dir}/variables"
 check_variables_are_set "${trial_dir_vars[@]}"
 
+if [ ! -z "${torch_dir_mixin}" ]; then
+  if [ "${freq_dim}" -ne "${freq_dim_mixin}" ]; then
+    echo "\
+Mix-in frequency dimension (${freq_dim_mixin}) does not match trained
+frequency dimension (${freq_dim})" 2>&1
+    exit 1
+  fi
+  dev_data="${dev_data_mixin}"
+  test_data="${test_data_mixin}"
+fi
+
 if [ -z "${device}" ]; then
   if python -c 'import sys; import torch; sys.exit(0 if torch.cuda.is_available() else 1)'; then
     device=cuda
@@ -121,9 +162,9 @@ for x in dev test; do
     -o bm \
     "${pdfs_dir}" "ark,scp:${pdfs_dir}/pdfs.ark,${pdfs_dir}/pdfs.scp"
   graph_dir="$(dirname "${HCLG}")"
-  # acoustic-scale is 1 because we re-scale in scoring
+  # FIXME(sdrobert): should invert acoustic scale
   latgen-faster-mapped \
-    --acoustic-scale=1.0 \
+    --acoustic-scale=0.1 \
     "--min-active=${min_active}" \
     "--max-active=${max_active}" \
     "--max-mem=${max_mem}" \

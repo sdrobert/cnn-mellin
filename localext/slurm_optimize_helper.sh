@@ -19,7 +19,7 @@ fi
 
 # this helps ensure not everyone is querying/creating the database at the same
 # time
-sleep ${SLURM_ARRAY_TASK_ID}
+sleep $((${SLURM_ARRAY_TASK_ID} * 2))
 
 trial_dir="$(sed "${SLURM_ARRAY_TASK_ID}q;d" exp/matrix)"
 # name and trial num
