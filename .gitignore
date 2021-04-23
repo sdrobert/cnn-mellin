@@ -115,3 +115,4 @@ cmd.sh
 data/
 exp/
 conf/slurm.conf
+.gitversion
