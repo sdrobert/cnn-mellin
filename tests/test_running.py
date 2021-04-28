@@ -67,6 +67,21 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
     assert np.isclose(loss_d, loss_a)
 
 
+def test_greedy_decode_am(temp_dir, device, populate_torch_dir):
+    C, V, F, N1, N2 = 30, 11, 7, 1, 5
+    populate_torch_dir(temp_dir, C, num_filts=F, max_class=V - 1)
+    data_params = data.SpectDataSetParams(batch_size=N1, drop_last=False)
+    loader = data.SpectEvaluationDataLoader(temp_dir, data_params, batch_first=False)
+    model = DummyAM(F, V + 1, models.AcousticModelParams())
+    model.to(device)
+    er_a = running.greedy_decode_am(model, loader)
+    assert not np.isclose(er_a, 0.0)
+    data_params.batch_size = N2
+    loader = data.SpectEvaluationDataLoader(temp_dir, data_params, batch_first=False)
+    er_b = running.greedy_decode_am(model, loader)
+    assert np.isclose(er_a, er_b)
+
+
 # def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
 #     populate_torch_dir(temp_dir, 50)
 #     spect_p = data.ContextWindowDataSetParams(

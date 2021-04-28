@@ -7,10 +7,11 @@
 
 # from itertools import count as icount
 
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, Tuple
 import torch
 import param
 import pydrobert.torch.training as training
+import pydrobert.torch.util as util
 
 import pydrobert.torch.data as data
 import cnn_mellin.models as models
@@ -110,97 +111,113 @@ def train_am_for_epoch(
     return total_loss
 
 
-# def train_am_for_epoch(
-#     model,
-#     data_loader,
-#     optimizer,
-#     params,
-#     epoch=None,
-#     device="cpu",
-#     weight=None,
-#     batch_callbacks=tuple(),
-# ):
-#     """Train an acoustic model for one epoch using cross-entropy loss
-
-#     Parameters
-#     ----------
-#     model : AcousticModel
-#     data_loader : pydrobert.torch.data.TrainingDataLoader
-#     params : TrainingEpochParams
-#     optimizer : torch.optim.Optimizer
-#     init_seed : int, optional
-#         The initial training seed. After every epoch, the torch seed will
-#         be set to ``init_seed + epoch``. If unset, does not touch torch
-#         seed
-#     epoch : int, optional
-#         The epoch we are running. If unset, does not touch `data_loader`'s
-#         epoch
-#     device : torch.device or str, optional
-#         On what device should the model/data be on
-#     weight : FloatTensor, optional
-#         Relative weights to assign to each class.
-#         `params.weigh_training_samples` must also be ``True`` to use during
-#         training
-#     batch_callbacks : sequence, optional
-#         A sequence of callbacks to perform after every batch. Callbacks should
-#         accept two positional arguments: one for the batch number, the other
-#         for the batch training loss
-
-#     Returns
-#     -------
-#     running_loss : float
-#         The batch-averaged cross-entropy loss for the epoch
-#     """
-#     device = torch.device(device)
-#     epoch_loss = 0.0
-#     total_batches = 0
-#     if epoch is None:
-#         epoch = data_loader.epoch
-#     else:
-#         data_loader.epoch = epoch
-#     model = model.to(device)
-#     optimizer_to(optimizer, device)
-#     if params.weigh_training_samples:
-#         if weight is None:
-#             warnings.warn(
-#                 "{}.weigh_training_samples is True, but no weight vector was "
-#                 "passed to train_am_for_epoch".format(params.name)
-#             )
-#         else:
-#             weight = weight.to(device)
-#     else:
-#         weight = None
-#     model.train()
-#     if params.seed is not None:
-#         torch.manual_seed(params.seed + epoch)
-#     model.dropout = params.dropout_prob
-#     loss_fn = torch.nn.CrossEntropyLoss(weight=weight)
-#     non_blocking = device.type == "cpu" or data_loader.pin_memory
-#     for feats, ali in data_loader:
-#         optimizer.zero_grad()
-#         feats = feats.to(device, non_blocking=non_blocking)
-#         ali = ali.to(device, non_blocking=non_blocking)
-#         loss = loss_fn(model(feats), ali)
-#         loss_val = loss.item()
-#         epoch_loss += loss_val
-#         loss.backward()
-#         optimizer.step()
-#         del feats, ali, loss
-#         for callback in batch_callbacks:
-#             callback(total_batches, loss_val)
-#         total_batches += 1
-#     return epoch_loss / total_batches
+# FIXME(sdrobert): use pydrobert-pytorch copy when PR merged
+def ctc_greedy_search(
+    logits: torch.Tensor,
+    in_lens: Optional[torch.Tensor] = None,
+    blank_idx: int = -1,
+    batch_first: bool = False,
+    is_probs: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if logits.dim() != 3:
+        raise RuntimeError("logits must be 3-dimensional")
+    V = logits.size(2)
+    if blank_idx < -V or blank_idx > (V - 1):
+        raise IndexError(
+            "Blank index out of range (expected to be in the range of "
+            f"[-{V},{V-1}], but got {blank_idx})"
+        )
+    blank_idx = (blank_idx + V) % V
+    if not is_probs:
+        # normalize
+        logits = logits.log_softmax(2)
+    max_, argmax = logits.max(2)
+    keep_mask = argmax != blank_idx
+    if batch_first:
+        keep_mask[:, 1:] &= argmax[:, 1:] != argmax[:, :-1]
+        seq_dim = 1
+    else:
+        keep_mask[1:] &= argmax[1:] != argmax[:-1]
+        seq_dim = 0
+    seq_size = argmax.size(seq_dim)
+    if in_lens is not None:
+        in_len_mask = torch.arange(seq_size, device=argmax.device).unsqueeze(
+            1 - seq_dim
+        ) < in_lens.unsqueeze(seq_dim)
+        keep_mask = keep_mask & in_len_mask
+        if is_probs:
+            max_ = max_.masked_fill(~in_len_mask, 1.0)
+        else:
+            max_ = max_.masked_fill(~in_len_mask, 0.0)
+        del in_len_mask
+    out_lens = keep_mask.long().sum(seq_dim)
+    data = argmax.masked_select(keep_mask)
+    out_len_mask = torch.arange(seq_size, device=argmax.device).unsqueeze(
+        1 - seq_dim
+    ) < out_lens.unsqueeze(seq_dim)
+    if is_probs:
+        max_ = max_.prod(seq_dim)
+    else:
+        max_ = max_.sum(seq_dim)
+    return max_, argmax.masked_scatter_(out_len_mask, data), out_lens
 
 
-# class TrainingParams(TrainingEpochParams, training.TrainingStateParams):
-#     optimizer = param.ObjectSelector(
-#         "adam",
-#         objects=["adam", "adadelta", "adagrad", "sgd"],
-#         doc="The optimizer to train with",
-#     )
-#     weight_decay = param.Number(
-#         0, bounds=(0, None), doc="The L2 penalty to apply to weights"
-#     )
+def greedy_decode_am(
+    model: models.AcousticModel, loader: data.SpectEvaluationDataLoader,
+) -> float:
+    """Determine average error rate on eval set using greedy decoding
+
+    This should only be used in the training process for the dev set. A prefix search
+    outputting trn files should be preferred for the test set.
+    """
+
+    if loader.batch_first:
+        raise ValueError("data loader batch_first must be false")
+
+    device = model.lift.log_tau.device
+    non_blocking = device.type == "cpu" or loader.pin_memory
+
+    model.eval()
+
+    total_errs = 0.0
+    total_refs = 0
+
+    with torch.no_grad():
+        for feats, _, refs, feat_lens, ref_lens, _ in loader:
+            feats = feats.to(device, non_blocking=non_blocking)
+            refs = refs.to(device, non_blocking=non_blocking)
+            if refs.dim() == 3:
+                refs = refs[..., 0]
+            feat_lens = feat_lens.to(device, non_blocking=non_blocking)
+            ref_lens = ref_lens.to(device, non_blocking=non_blocking)
+            logits, lens = model(feats, feat_lens)
+            _, hyps, lens_ = ctc_greedy_search(logits, lens)
+            ref_len_mask = (
+                torch.arange(refs.size(0), device=device).unsqueeze(1) >= ref_lens
+            )
+            refs.masked_fill_(ref_len_mask, -1)
+            hyp_len_mask = (
+                torch.arange(hyps.size(0), device=device).unsqueeze(1) >= lens_
+            )
+            hyps.masked_fill_(hyp_len_mask, -1)
+            er = util.error_rate(refs, hyps, -1)
+            total_errs += er.sum().item()
+            total_refs += ref_lens.sum().item()
+            del (
+                feats,
+                refs,
+                feat_lens,
+                ref_lens,
+                logits,
+                lens,
+                hyps,
+                lens_,
+                ref_len_mask,
+                hyp_len_mask,
+                er,
+            )
+
+    return total_errs / total_refs
 
 
 # def train_am(
