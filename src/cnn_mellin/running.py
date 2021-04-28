@@ -1,13 +1,10 @@
 """Functions involved in running the models"""
 
-# import os
+import os
+import sys
 
-# import time
-# import warnings
+from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
-# from itertools import count as icount
-
-from typing import Any, Callable, Optional, Sequence, Tuple
 import torch
 import param
 import pydrobert.torch.training as training
@@ -15,6 +12,8 @@ import pydrobert.torch.util as util
 
 import pydrobert.torch.data as data
 import cnn_mellin.models as models
+
+from tqdm import tqdm
 
 
 class MyTrainingStateParams(training.TrainingStateParams):
@@ -28,27 +27,21 @@ class MyTrainingStateParams(training.TrainingStateParams):
         doc="Which method of gradient descent to perform",
     )
     dropout_prob = param.Magnitude(0.0, doc="The model dropout probability")
-
-    @classmethod
-    def get_tunable(cls):
-        return super().get_tunable() | {"dropout_prob", "optimizer"}
-
-    @classmethod
-    def suggest_params(cls, trial, base, only, prefix):
-        params = super().suggest_params(trial, base=base, only=only, prefix=prefix)
-
-        if only is None:
-            only = cls.get_tunable()
-        if "dropout_prob" in only:
-            params.dropout_prob = trial.suggest_uniform(
-                prefix + "dropout_prob", 0.0, 1.0
-            )
-        if "optimizer" in only:
-            dict_ = params.param.params().get_range()
-            chosen = trial.suggest_categorical(prefix + "optimizer", sorted(dict_))
-            params.optimizer = dict_[chosen]
-
-        return params
+    max_time_warp = param.Number(
+        80.0,
+        bounds=(0.0, None),
+        doc="SpecAugment max time dimension warp during training",
+    )
+    max_freq_warp = param.Number(
+        0.0,
+        bounds=(0.0, None),
+        doc="SpecAugment max frequency dimension warp during training",
+    )
+    max_time_mask = param.Integer(
+        100,
+        bounds=(0, None),
+        doc="SpecAugment max number of sequential frames in time to mask",
+    )
 
 
 def train_am_for_epoch(
@@ -58,7 +51,7 @@ def train_am_for_epoch(
     controller: training.TrainingStateController,
     params: Optional[MyTrainingStateParams] = None,
     epoch: Optional[int] = None,
-    batch_callbacks: Sequence[Callable[[int, float], Any]] = tuple(),
+    quiet: bool = True,
 ) -> float:
     """Train the acoustic model with a CTC objective"""
 
@@ -79,12 +72,16 @@ def train_am_for_epoch(
     device = model.lift.log_tau.device
     non_blocking = device.type == "cpu" or loader.pin_memory
 
-    controller.load_model_and_optimizer_for_epoch(model, optimizer, epoch - 1, True)
+    if epoch == 1 or (controller.state_dir and controller.state_csv_path):
+        controller.load_model_and_optimizer_for_epoch(model, optimizer, epoch - 1, True)
 
     model.dropout = params.dropout_prob
     model.train()
 
     loss_fn = torch.nn.CTCLoss(blank=model.target_dim - 1, zero_infinity=True)
+
+    if not quiet:
+        loader = tqdm(loader)
 
     total_loss = 0.0
     total_batches = 0
@@ -103,8 +100,6 @@ def train_am_for_epoch(
         loss = loss.item()
         del feats, refs, feat_lens, ref_lens, lens, logits
         optimizer.step()
-        for callback in batch_callbacks:
-            callback(total_batches, loss)
         total_loss += loss
         total_batches += 1
 
@@ -218,6 +213,112 @@ def greedy_decode_am(
             )
 
     return total_errs / total_refs
+
+
+def get_filts_and_classes(train_dir: str) -> Tuple[int, int]:
+    """Given the training partition directory, determine the number of filters/classes
+
+    Always use training partition info! Number of filts in test partition might be the
+    same, but maybe not the number of classes.
+
+    Returns
+    -------
+    num_filts, num_classes : int, int
+    """
+    part_name = os.path.basename(train_dir)
+    ext_file = os.path.join(os.path.dirname(train_dir), "ext", f"{part_name}.info.ark")
+    if not os.path.isfile(ext_file):
+        raise ValueError(f"Could not find '{ext_file}'")
+    dict_ = dict()
+    with open(ext_file) as file_:
+        for line in file_:
+            k, v = line.strip().split()
+            dict_[k] = v
+    return int(dict_["num_filts"]), int(dict_["max_ref_class"]) + 1
+
+
+def train_am(
+    model_params: models.AcousticModelParams,
+    training_params: MyTrainingStateParams,
+    data_params: data.SpectDataSetParams,
+    train_dir: str,
+    dev_dir: str,
+    model_dir: Optional[str] = None,
+    device: Union[torch.device, str] = "cpu",
+    num_data_workers: int = os.cpu_count() - 1,
+    epoch_callbacks: Sequence[Callable[[int, float, float], Any]] = tuple(),
+    quiet: bool = True,
+) -> Tuple[models.AcousticModel, float]:
+
+    device = torch.device(device)
+
+    num_filts, num_classes = get_filts_and_classes(train_dir)
+
+    model = models.AcousticModel(num_filts, num_classes + 1, model_params)
+    model.to(device)
+    optimizer = training_params.optimizer(model.parameters(), lr=1e-4)
+
+    if model_dir is not None:
+        state_dir = os.path.join(model_dir, "training")
+        state_csv = os.path.join(model_dir, "hist.csv")
+    else:
+        state_dir = state_csv = None
+
+    controller = training.TrainingStateController(
+        training_params, state_csv, state_dir, warn=not quiet
+    )
+
+    train_loader = data.SpectTrainingDataLoader(
+        train_dir,
+        data_params,
+        batch_first=False,
+        seed=training_params.seed,
+        pin_memory=device.type == "cuda",
+        num_workers=num_data_workers,
+    )
+    dev_loader = data.SpectEvaluationDataLoader(
+        dev_dir, data_params, batch_first=False, num_workers=num_data_workers
+    )
+
+    dev_err = float("inf")
+    epoch = controller.get_last_epoch() + 1
+    while controller.continue_training(epoch):
+        if not quiet:
+            print(f"Training epoch {epoch}...", file=sys.stderr)
+        train_loss = train_am_for_epoch(
+            model, train_loader, optimizer, controller, training_params, epoch, quiet
+        )
+        if not quiet:
+            print("Epoch completed. Determining average error rate...", file=sys.stderr)
+        dev_err = greedy_decode_am(model, dev_loader)
+        controller.update_for_epoch(model, optimizer, train_loss, dev_err, epoch)
+        if not quiet:
+            print(
+                f"Train loss: {train_loss:e}, dev err: {dev_err:.1%}", file=sys.stderr
+            )
+        for callback in epoch_callbacks:
+            callback(epoch, train_loss, dev_err)
+        epoch += 1
+
+    if not quiet:
+        print(f"Finished training at epoch {epoch - 1}", file=sys.stderr)
+
+    if model_dir is not None:
+        epoch = controller.get_best_epoch()
+        if not quiet:
+            print(
+                f"Best epoch was {epoch}. Returning that model (and that error)",
+                file=sys.stderr,
+            )
+        model = controller.load_model_for_epoch(epoch)
+        dev_err = controller.get_info(epoch)["val_met"]
+    elif not quiet:
+        print(
+            f"No history kept. Returning model from last epoch ({epoch - 1})",
+            file=sys.stderr,
+        )
+
+    return model, dev_err
 
 
 # def train_am(

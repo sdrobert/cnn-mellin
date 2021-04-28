@@ -8,6 +8,8 @@ import pydrobert.torch.training as training
 import pydrobert.torch.data as data
 import numpy as np
 
+from pydrobert.torch.command_line import get_torch_spect_data_dir_info
+
 # import pytest
 # import pydrobert.torch.data as data
 # import cnn_mellin.running as running
@@ -82,58 +84,32 @@ def test_greedy_decode_am(temp_dir, device, populate_torch_dir):
     assert np.isclose(er_a, er_b)
 
 
-# def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
-#     populate_torch_dir(temp_dir, 50)
-#     spect_p = data.ContextWindowDataSetParams(
-#         context_left=1,
-#         context_right=1,
-#         batch_size=5,
-#         seed=2,
-#         drop_last=True,
-#     )
-#     data_loader = data.ContextWindowTrainingDataLoader(
-#         temp_dir, spect_p, num_workers=4)
-#     train_p = running.TrainingEpochParams(
-#         num_epochs=10,
-#         seed=3,
-#         dropout_prob=.5,
-#     )
-#     model = DummyAM(5, 11)
-#     # important! Use optimizer without history
-#     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-#     loss_a = running.train_am_for_epoch(
-#         model, data_loader, optimizer, train_p, device=device)
-#     assert loss_a != 0
-#     loss_b = running.train_am_for_epoch(
-#         model, data_loader, optimizer, train_p, device=device)
-#     assert loss_a > loss_b  # we learned something, maybe?
-#     optimizer.zero_grad()
-#     # important! We have to initialize parameters on the same device to get the
-#     # same results!
-#     model.cpu().reset_parameters()
-#     loss_c = running.train_am_for_epoch(
-#         model, data_loader, optimizer, train_p, epoch=0, device=device)
-#     assert abs(loss_a - loss_c) < 1e-5
-
-
-# @pytest.mark.gpu
-# def test_train_am_for_epoch_changing_devices(temp_dir, populate_torch_dir):
-#     populate_torch_dir(temp_dir, 50)
-#     spect_p = data.ContextWindowDataSetParams(
-#         context_left=1,
-#         context_right=1,
-#         batch_size=5,
-#         seed=2,
-#         drop_last=True,
-#     )
-#     data_loader = data.ContextWindowTrainingDataLoader(
-#         temp_dir, spect_p, num_workers=4)
-#     model = DummyAM(5, 11)
-#     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-#     train_p = running.TrainingEpochParams(seed=3)
-#     running.train_am_for_epoch(
-#         model, data_loader, optimizer, train_p, device='cuda')
-#     running.train_am_for_epoch(
-#         model, data_loader, optimizer, train_p, device='cpu')
-#     running.train_am_for_epoch(
-#         model, data_loader, optimizer, train_p, device='cuda')
+def test_train_am(temp_dir, device, populate_torch_dir):
+    C, V, F, X = 20, 5, 5, 3
+    train_dir = os.path.join(temp_dir, "train")
+    ext_dir = os.path.join(temp_dir, "ext")
+    os.makedirs(ext_dir, exist_ok=True)
+    populate_torch_dir(train_dir, C, num_filts=F, max_class=V - 1)
+    assert not get_torch_spect_data_dir_info(
+        [train_dir, os.path.join(ext_dir, "train.info.ark")]
+    )
+    _, er_a = running.train_am(
+        models.AcousticModelParams(),
+        running.MyTrainingStateParams(num_epochs=X, seed=0),
+        data.SpectDataSetParams(),
+        train_dir,
+        train_dir,
+        device=device,
+        num_data_workers=0,
+    )
+    assert not np.isclose(er_a, 0.0)
+    _, er_b = running.train_am(
+        models.AcousticModelParams(),
+        running.MyTrainingStateParams(num_epochs=X, seed=0),
+        data.SpectDataSetParams(),
+        train_dir,
+        train_dir,
+        device=device,
+        num_data_workers=0,
+    )
+    assert np.isclose(er_a, er_b)
