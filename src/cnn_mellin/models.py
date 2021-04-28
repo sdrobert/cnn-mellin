@@ -116,9 +116,10 @@ class AcousticModel(torch.nn.Module):
 
     Expects input `x` of shape ``(T, N, audio_dim)`` representing the batched audio
     signals and `lens` of shape ``(N,)`` of the lengths of each audio sequence in the
-    batch. Returns `y` and `lens_` of shape ``(T', N, output_dim)``, where
+    batch. Returns `y` of shape ``(T', N, target_dim)`` and ``lens_`` of shape ``N``,
+    where
 
-        lens_[n] = (lens[n] - params.window_size) // params.window_stride + 1
+        lens_[n] = (lens[n] - 1) // params.window_stride + 1
 
     Represents the new lengths of audio sequences based on the number of windows that
     were extracted.

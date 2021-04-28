@@ -7,105 +7,107 @@
 
 # from itertools import count as icount
 
-# import torch
-# import param
-# import pydrobert.torch.training as training
-# import pydrobert.torch.data as data
-# import cnn_mellin.models as models
+from typing import Any, Callable, Optional, Sequence
+import torch
+import param
+import pydrobert.torch.training as training
 
-# def get_am_alignment_cross_entropy(model, data_loader, device="cpu", weight=None):
-#     """Get the mean cross entropy of alignments over a data set
-
-#     Parameters
-#     ----------
-#     model : AcousticModel
-#     data_loader : pydrobert.torch.data.EvaluationDataLoader
-#     device : torch.device or str, optional
-#         What device should the model/data be on
-#     weight : FloatTensor, optional
-#         Relative weights to assign to each class. If unset, weights are
-#         uniform
-
-#     Returns
-#     -------
-#     average_loss : float
-#         The cross-entropy loss averaged over all context windows
-#     """
-#     device = torch.device(device)
-#     if not len(data_loader):
-#         raise ValueError("There must be at least one batch of data!")
-#     total_windows = 0
-#     total_loss = 0
-#     if weight is not None:
-#         weight = weight.to(device)
-#     loss_fn = torch.nn.CrossEntropyLoss(weight=weight, reduction="sum")
-#     model = model.to(device)
-#     model.eval()
-#     non_blocking = device.type == "cpu" or data_loader.pin_memory
-#     with torch.no_grad():
-#         for feats, ali, feat_sizes, _ in data_loader:
-#             total_windows += sum(feat_sizes)
-#             if ali is None:
-#                 raise ValueError("Alignments must be specified!")
-#             feats = feats.to(device, non_blocking=non_blocking)
-#             ali = ali.to(device, non_blocking=non_blocking)
-#             joint = model(feats)
-#             loss = loss_fn(joint, ali)
-#             total_loss += loss.item()
-#             del feats, ali, joint, loss
-#     return total_loss / total_windows
+import pydrobert.torch.data as data
+import cnn_mellin.models as models
 
 
-# def write_am_pdfs(model, data_loader, log_prior, device="cpu", pdfs_dir=None):
-#     """Write emission probabilities for a data set
+class MyTrainingStateParams(training.TrainingStateParams):
+    optimizer = param.ObjectSelector(
+        torch.optim.Adam,
+        objects={
+            "adam": torch.optim.Adam,
+            "sgd": torch.optim.SGD,
+            "rms": torch.optim.RMSprop,
+        },
+        doc="Which method of gradient descent to perform",
+    )
+    dropout_prob = param.Magnitude(0.0, doc="The model dropout probability")
 
-#     Parameters
-#     ----------
-#     model : AcousticModel
-#     data_loader : pydrobert.torch.data.EvaluationDataLoader
-#     log_prior : FloatTensor
-#         A prior distribution over the targets (senones), in natural logarithm.
-#         `log_prior` is necessary for converting the joint distribution of
-#         input and targets produced by the acoustic model into the probabilities
-#         of inputs conditioned on the targets
-#     device : torch.device or str, optional
-#         What device to perform computations on. The pdfs will always be saved
-#         as (cpu) ``torch.FloatTensor``s
-#     pdfs_dir : str or None, optional
-#         If set, pdfs will be written to this directory. Otherwise, pdfs will
-#         be written to the `data_loader`'s ``data_dir + '/pdfs'``
-#     """
-#     device = torch.device(device)
-#     model = model.to(device)
-#     log_prior = log_prior.to(device)
-#     model.eval()
-#     non_blocking = device.type == "cpu" or data_loader.pin_memory
-#     with torch.no_grad():
-#         for feats, _, feat_sizes, utt_ids in data_loader:
-#             feats = feats.to(device, non_blocking=non_blocking)
-#             y = model(feats)
-#             joint = torch.nn.functional.log_softmax(y, dim=1)
-#             pdf = joint - log_prior
-#             for feat_size, utt_id in zip(feat_sizes, utt_ids):
-#                 pdf_utt = pdf[:feat_size]
-#                 data_loader.data_source.write_pdf(utt_id, pdf_utt, pdfs_dir=pdfs_dir)
-#                 pdf = pdf[feat_size:]
+    @classmethod
+    def get_tunable(cls):
+        return super().get_tunable() | {"dropout_prob", "optimizer"}
+
+    @classmethod
+    def suggest_params(cls, trial, base, only, prefix):
+        params = super().suggest_params(trial, base=base, only=only, prefix=prefix)
+
+        if only is None:
+            only = cls.get_tunable()
+        if "dropout_prob" in only:
+            params.dropout_prob = trial.suggest_uniform(
+                prefix + "dropout_prob", 0.0, 1.0
+            )
+        if "optimizer" in only:
+            dict_ = params.param.params().get_range()
+            chosen = trial.suggest_categorical(prefix + "optimizer", sorted(dict_))
+            params.optimizer = dict_[chosen]
+
+        return params
 
 
-# class TrainingEpochParams(param.Parameterized):
-#     seed = param.Integer(
-#         None,
-#         doc="The seed used to seed PyTorch at every epoch of training. Will "
-#         "control things like dropout masks. Will be incremented at every "
-#         "epoch. If unset, will not touch the torch seed.",
-#     )
-#     dropout_prob = param.Magnitude(0.0, doc="The model dropout probability")
-#     weigh_training_samples = param.Boolean(
-#         True,
-#         doc="If a weight tensor is provided during training and this is "
-#         "``True``, per-frame loss will be weighed with the index matching "
-#         "the target",
-#     )
+def train_am_for_epoch(
+    model: models.AcousticModel,
+    loader: data.SpectTrainingDataLoader,
+    optimizer: torch.optim.Optimizer,
+    controller: training.TrainingStateController,
+    params: Optional[MyTrainingStateParams] = None,
+    epoch: Optional[int] = None,
+    batch_callbacks: Sequence[Callable[[int, float], Any]] = tuple(),
+) -> float:
+    """Train the acoustic model with a CTC objective"""
+
+    if epoch is None:
+        epoch = controller.get_last_epoch() + 1
+    loader.epoch = epoch
+
+    if params is None:
+        params = controller.params
+        if not isinstance(params, MyTrainingStateParams):
+            raise ValueError(
+                "if params = None, controller.params must be MyTrainingStateParams"
+            )
+
+    if loader.batch_first:
+        raise ValueError("data loader batch_first must be false")
+
+    device = model.lift.log_tau.device
+    non_blocking = device.type == "cpu" or loader.pin_memory
+
+    controller.load_model_and_optimizer_for_epoch(model, optimizer, epoch - 1, True)
+
+    model.dropout = params.dropout_prob
+    model.train()
+
+    loss_fn = torch.nn.CTCLoss(blank=model.target_dim - 1, zero_infinity=True)
+
+    total_loss = 0.0
+    total_batches = 0
+    for feats, _, refs, feat_lens, ref_lens in loader:
+        feats = feats.to(device, non_blocking=non_blocking)
+        refs = refs.to(device, non_blocking=non_blocking)
+        feat_lens = feat_lens.to(device, non_blocking=non_blocking)
+        optimizer.zero_grad()
+        if refs.dim() == 3:
+            refs = refs[..., 0]
+        refs = refs.t()  # (N, S)
+        logits, lens = model(feats, feat_lens)
+        logits = torch.nn.functional.log_softmax(logits, 2)
+        loss = loss_fn(logits, refs, lens, ref_lens)
+        loss.backward()
+        loss = loss.item()
+        del feats, refs, feat_lens, ref_lens, lens, logits
+        optimizer.step()
+        for callback in batch_callbacks:
+            callback(total_batches, loss)
+        total_loss += loss
+        total_batches += 1
+
+    return total_loss
 
 
 # def train_am_for_epoch(

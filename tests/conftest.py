@@ -56,7 +56,7 @@ def populate_torch_dir():
     ):
         if seed is not None:
             torch.manual_seed(seed)
-        feats_dir = os.path.join(dr, "feats")
+        feats_dir = os.path.join(dr, "feat")
         ref_dir = os.path.join(dr, "ref")
         os.makedirs(feats_dir, exist_ok=True)
         if include_refs:
@@ -76,7 +76,7 @@ def populate_torch_dir():
             utt_ids.append(utt_id)
             if include_refs:
                 ref_size = torch.randint(1, feat_size + 1, (1,)).item()
-                ref_tokens = torch.randint(max_class + 1, (ref_size,))
+                ref_tokens = torch.randint(max_class + 1, (ref_size, 1))
                 ref_bounds = torch.full((ref_size, 2), -1, dtype=torch.long)
                 ref = torch.cat([ref_tokens, ref_bounds], 1)
                 torch.save(
