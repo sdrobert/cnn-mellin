@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 import cnn_mellin.layers as layers
 import cnn_mellin.models as models
@@ -9,15 +10,6 @@ import pydrobert.torch.data as data
 import numpy as np
 
 from pydrobert.torch.command_line import get_torch_spect_data_dir_info
-
-# import pytest
-# import pydrobert.torch.data as data
-# import cnn_mellin.running as running
-
-# __author__ = "Sean Robertson"
-# __email__ = "sdrobert@cs.toronto.edu"
-# __license__ = "Apache 2.0"
-# __copyright__ = "Copyright 2018 Sean Robertson"
 
 
 class DummyAM(torch.nn.Module):
@@ -38,7 +30,7 @@ class DummyAM(torch.nn.Module):
 
     def forward(self, x, lens):
         x = self.fc(self.lift(x))
-        return x, (lens - 1) // self.params.window_stride + 1
+        return x, lens
 
 
 def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
@@ -70,6 +62,7 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
 
 
 def test_greedy_decode_am(temp_dir, device, populate_torch_dir):
+    torch.manual_seed(2)
     C, V, F, N1, N2 = 30, 11, 7, 1, 5
     populate_torch_dir(temp_dir, C, num_filts=F, max_class=V - 1)
     data_params = data.SpectDataSetParams(batch_size=N1, drop_last=False)
@@ -84,11 +77,16 @@ def test_greedy_decode_am(temp_dir, device, populate_torch_dir):
     assert np.isclose(er_a, er_b)
 
 
-def test_train_am(temp_dir, device, populate_torch_dir):
+@pytest.mark.parametrize("include_hist", [True, False])
+def test_train_am(temp_dir, device, populate_torch_dir, include_hist):
     C, V, F, X = 20, 5, 5, 3
     train_dir = os.path.join(temp_dir, "train")
     ext_dir = os.path.join(temp_dir, "ext")
     os.makedirs(ext_dir, exist_ok=True)
+    if include_hist:
+        model_dir = os.path.join(temp_dir, "models")
+    else:
+        model_dir = None
     populate_torch_dir(train_dir, C, num_filts=F, max_class=V - 1)
     assert not get_torch_spect_data_dir_info(
         [train_dir, os.path.join(ext_dir, "train.info.ark")]
@@ -99,6 +97,7 @@ def test_train_am(temp_dir, device, populate_torch_dir):
         data.SpectDataSetParams(),
         train_dir,
         train_dir,
+        model_dir=model_dir,
         device=device,
         num_data_workers=0,
     )
@@ -109,6 +108,7 @@ def test_train_am(temp_dir, device, populate_torch_dir):
         data.SpectDataSetParams(),
         train_dir,
         train_dir,
+        model_dir=model_dir,
         device=device,
         num_data_workers=0,
     )

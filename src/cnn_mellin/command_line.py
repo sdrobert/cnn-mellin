@@ -1,5 +1,129 @@
 """Command line hooks for cnn_mellin"""
 
+import os
+import argparse
+import warnings
+import sys
+
+from collections import OrderedDict
+from typing import Optional, Sequence
+
+import torch
+import cnn_mellin.models as models
+import cnn_mellin.running as running
+import pydrobert.torch.data as data
+import pydrobert.param.argparse as pargparse
+
+
+def construct_default_param_dict():
+    return OrderedDict(
+        (
+            ("model", models.AcousticModelParams(name="model")),
+            ("training", running.MyTrainingStateParams(name="training")),
+            ("data", data.SpectDataSetParams(name="data")),
+        )
+    )
+
+
+def readable_dir(str_):
+    if not os.path.isdir(str_):
+        raise argparse.ArgumentTypeError(f"'{str_}' is not a directory")
+    return os.path.abspath(str_)
+
+
+def writable_dir(str_):
+    if not os.path.isdir(str_):
+        try:
+            os.makedirs(str_)
+        except OSError:
+            raise argparse.ArgumentTypeError(f"Cannot create directory at '{str_}'")
+    return os.path.abspath(str_)
+
+
+def parse_args(args: Optional[Sequence[str]], param_dict: dict):
+    parser = argparse.ArgumentParser(
+        description="Training, decoding, or hyperparameter optimization"
+    )
+    parser.add_argument(
+        "--model-dir",
+        type=writable_dir,
+        default=None,
+        help="Where to save/load models and training history to/from",
+    )
+    parser.add_argument(
+        "--device",
+        type=torch.device,
+        default="cpu",
+        help="Which device to perform operations on",
+    )
+    pargparse.add_parameterized_print_group(parser, parameterized=param_dict)
+    pargparse.add_parameterized_read_group(parser, parameterized=param_dict)
+
+    subparsers = parser.add_subparsers(required=True, dest="command")
+    train_parser = subparsers.add_parser("train", help="Train an acoustic model")
+    train_parser.add_argument(
+        "train_dir", type=readable_dir, help="Training data directory"
+    )
+    train_parser.add_argument(
+        "dev_dir",
+        nargs="?",
+        type=readable_dir,
+        help="Validation directory. If unset, uses training directory",
+    )
+    train_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress output to stderr",
+    )
+    train_parser.add_argument(
+        "--num-data-workers",
+        type=int,
+        default=os.cpu_count() - 1,
+        help="Number of background workers for training data loader. 0 is serial. "
+        "Defaults to one fewer than the number of virtual cores on the machine.",
+    )
+
+    return parser.parse_args(args)
+
+
+def train(options, param_dict):
+    if options.model_dir is None:
+        warnings.warn("--model-dir was not set! Will not save anything!")
+    model, _ = running.train_am(
+        param_dict["model"],
+        param_dict["training"],
+        param_dict["data"],
+        options.train_dir,
+        options.train_dir if options.dev_dir is None else options.dev_dir,
+        options.model_dir,
+        options.device,
+        options.num_data_workers,
+        tuple(),
+        options.quiet,
+    )
+    if options.model_dir is not None:
+        model_pt = os.path.join(options.model_dir, "model.pt")
+        if not options.quiet:
+            print(f"Saving final model to '{model_pt}'", file=sys.stderr)
+        # add the number of classes and number of filters to the state dict so that
+        # we don't have to keep track of the
+        state_dict = model.state_dict()
+        assert "target_dim" not in state_dict
+        assert "freq_dim" not in state_dict
+        state_dict["target_dim"] = model.target_dim
+        state_dict["freq_dim"] = model.freq_dim
+        torch.save(state_dict, model_pt)
+
+
+def cnn_mellin(args: Optional[Sequence[str]] = None):
+    param_dict = construct_default_param_dict()
+    options = parse_args(args, param_dict)
+
+    if options.command == "train":
+        train(options, param_dict)
+
+
 # import argparse
 # import sys
 # import os
