@@ -9,6 +9,7 @@ import torch
 import param
 import pydrobert.torch.training as training
 import pydrobert.torch.util as util
+import pydrobert.torch.layers as layers
 
 import pydrobert.torch.data as data
 import cnn_mellin.models as models
@@ -40,7 +41,32 @@ class MyTrainingStateParams(training.TrainingStateParams):
     max_time_mask = param.Integer(
         100,
         bounds=(0, None),
-        doc="SpecAugment max number of sequential frames in time to mask",
+        doc="SpecAugment absolute upper bound on sequential frames in time to mask per "
+        "mask",
+    )
+    max_freq_mask = param.Integer(
+        27,
+        bounds=(0, None),
+        doc="SpecAgument max number of coefficients in frequency to mask per mask",
+    )
+    max_time_mask_proportion = param.Magnitude(
+        0.04,
+        doc="SpecAugment relative upper bound on the number of sequential frames in "
+        "time to mask per mask",
+    )
+    num_time_mask = param.Integer(
+        20,
+        bounds=(0, None),
+        doc="SpecAgument absolute upper bound on the number of temporal masks to apply",
+    )
+    num_time_mask_proportion = param.Magnitude(
+        0.04,
+        doc="SpecAugment relative upper bound on the number of temporal masks to apply",
+    )
+    num_freq_mask = param.Integer(
+        2,
+        bounds=(0, None),
+        doc="SpecAugment maximum number of frequency masks to apply",
     )
 
 
@@ -66,8 +92,8 @@ def train_am_for_epoch(
                 "if params = None, controller.params must be MyTrainingStateParams"
             )
 
-    if loader.batch_first:
-        raise ValueError("data loader batch_first must be false")
+    if not loader.batch_first:
+        raise ValueError("data loader batch_first must be true")
 
     device = model.lift.log_tau.device
     non_blocking = device.type == "cpu" or loader.pin_memory
@@ -80,8 +106,26 @@ def train_am_for_epoch(
 
     loss_fn = torch.nn.CTCLoss(blank=model.target_dim - 1, zero_infinity=True)
 
+    spec_augment = (
+        layers.SpecAugment(
+            params.max_time_warp,
+            params.max_freq_warp,
+            params.max_time_mask,
+            params.max_freq_mask,
+            params.max_time_mask_proportion,
+            params.num_time_mask,
+            params.num_time_mask_proportion,
+            params.num_freq_mask,
+        )
+        .train()
+        .to(device)
+    )
+
     if not quiet:
         loader = tqdm(loader)
+
+    if params.seed is not None:
+        torch.manual_seed(params.seed * epoch + epoch)
 
     total_loss = 0.0
     total_batches = 0
@@ -92,7 +136,7 @@ def train_am_for_epoch(
         optimizer.zero_grad()
         if refs.dim() == 3:
             refs = refs[..., 0]
-        refs = refs.t()  # (N, S)
+        feats = spec_augment(feats)
         logits, lens = model(feats, feat_lens)
         logits = torch.nn.functional.log_softmax(logits, 2)
         loss = loss_fn(logits, refs, lens, ref_lens)
@@ -167,8 +211,8 @@ def greedy_decode_am(
     outputting trn files should be preferred for the test set.
     """
 
-    if loader.batch_first:
-        raise ValueError("data loader batch_first must be false")
+    if not loader.batch_first:
+        raise ValueError("data loader batch_first must be true")
 
     device = model.lift.log_tau.device
     non_blocking = device.type == "cpu" or loader.pin_memory
@@ -184,6 +228,7 @@ def greedy_decode_am(
             refs = refs.to(device, non_blocking=non_blocking)
             if refs.dim() == 3:
                 refs = refs[..., 0]
+            refs = refs.t()
             feat_lens = feat_lens.to(device, non_blocking=non_blocking)
             ref_lens = ref_lens.to(device, non_blocking=non_blocking)
             logits, lens = model(feats, feat_lens)
@@ -272,13 +317,13 @@ def train_am(
     train_loader = data.SpectTrainingDataLoader(
         train_dir,
         data_params,
-        batch_first=False,
+        batch_first=True,
         seed=training_params.seed,
         pin_memory=device.type == "cuda",
         num_workers=num_data_workers,
     )
     dev_loader = data.SpectEvaluationDataLoader(
-        dev_dir, data_params, batch_first=False, num_workers=num_data_workers
+        dev_dir, data_params, batch_first=True, num_workers=num_data_workers
     )
 
     dev_err = float("inf")

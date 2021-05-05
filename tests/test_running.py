@@ -29,7 +29,7 @@ class DummyAM(torch.nn.Module):
         self.fc.reset_parameters()
 
     def forward(self, x, lens):
-        x = self.fc(self.lift(x))
+        x = self.fc(self.lift(x.transpose(0, 1)))
         return x, lens
 
 
@@ -40,7 +40,7 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
     state_csv = os.path.join(temp_dir, "state.csv")
     populate_torch_dir(data_dir, C, num_filts=F, max_class=V - 1)
     loader = data.SpectTrainingDataLoader(
-        data_dir, data.SpectDataSetParams(), batch_first=False
+        data_dir, data.SpectDataSetParams(), batch_first=True
     )
     model = DummyAM(F, V + 1, models.AcousticModelParams())
     controller = training.TrainingStateController(
@@ -62,17 +62,16 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
 
 
 def test_greedy_decode_am(temp_dir, device, populate_torch_dir):
-    torch.manual_seed(2)
     C, V, F, N1, N2 = 30, 11, 7, 1, 5
     populate_torch_dir(temp_dir, C, num_filts=F, max_class=V - 1)
     data_params = data.SpectDataSetParams(batch_size=N1, drop_last=False)
-    loader = data.SpectEvaluationDataLoader(temp_dir, data_params, batch_first=False)
+    loader = data.SpectEvaluationDataLoader(temp_dir, data_params, batch_first=True)
     model = DummyAM(F, V + 1, models.AcousticModelParams())
     model.to(device)
     er_a = running.greedy_decode_am(model, loader)
     assert not np.isclose(er_a, 0.0)
     data_params.batch_size = N2
-    loader = data.SpectEvaluationDataLoader(temp_dir, data_params, batch_first=False)
+    loader = data.SpectEvaluationDataLoader(temp_dir, data_params, batch_first=True)
     er_b = running.greedy_decode_am(model, loader)
     assert np.isclose(er_a, er_b)
 

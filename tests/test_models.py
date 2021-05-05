@@ -56,7 +56,7 @@ def test_can_run(
         bidirectional=bidirectional,
     )
     model = models.AcousticModel(F, Y, params).to(device)
-    x = torch.rand((T, N, F), device=device)
+    x = torch.rand((N, T, F), device=device)
     lens = torch.randint(1, T + 1, size=(N,), device=device)
     y, lens_ = model(x, lens)
     assert y.dim() == 3
@@ -86,13 +86,13 @@ def test_padding_yields_same_gradients(
     )
     model = models.AcousticModel(F, Y, params).to(device)
     parameters = list(model.parameters())
-    x = torch.rand((T, N, F), device=device, requires_grad=True)
+    x = torch.rand((N, T, F), device=device, requires_grad=True)
     lens = torch.randint(1, T + 1, size=(N,), device=device)
     total_loss_1 = 0.0
     for n in range(N):
         lens_t = lens[n : n + 1]
         lens_t_ = lens_t.item()
-        x_t = x[:lens_t_, n : n + 1]
+        x_t = x[n : n + 1, :lens_t_]
         y_t, lens__t = model(x_t, lens_t)
         assert lens__t.item() == (lens_t_ - 1) // window_stride + 1
         assert y_t.size(0) == lens__t.item()

@@ -234,10 +234,10 @@ class AcousticModel(torch.nn.Module):
             raise RuntimeError(
                 f"Final dimension size of x {x.size(2)} != {self.freq_dim}"
             )
-        if x.size(1) != lens.size(0):
+        if x.size(0) != lens.size(0):
             str_ = f"Batch size of x ({x.size(1)}) != lens size ({lens.size(0)})"
-            if x.size(0) == lens.size(0):
-                str_ += ". (batch dimension of x should be 1, not 0)"
+            if x.size(1) == lens.size(0):
+                str_ += ". (batch dimension of x should be 0, not 1)"
             raise RuntimeError(str_)
 
     def forward(
@@ -246,7 +246,7 @@ class AcousticModel(torch.nn.Module):
         self.check_input(x, lens)
         # zero the input past lens to ensure no weirdness
         len_mask = (
-            torch.arange(x.size(0), device=lens.device).unsqueeze(1) >= lens
+            torch.arange(x.size(1), device=lens.device) >= lens.unsqueeze(1)
         ).unsqueeze(2)
         x = x.masked_fill(len_mask, 0)
         del len_mask
@@ -254,13 +254,15 @@ class AcousticModel(torch.nn.Module):
         # of taking the final window if it's incomplete
         # N.B. this has to be zero-padding b/c shorter sequences will be zero-padded.
         if self.params.window_size > 1:
-            x = torch.nn.functional.pad(x, (0, 0, 0, 0, 0, self.params.window_size - 1))
-        x = x.unfold(0, self.params.window_size, self.params.window_stride).transpose(
+            x = torch.nn.functional.pad(x, (0, 0, 0, self.params.window_size - 1))
+        x = x.unfold(1, self.params.window_size, self.params.window_stride).transpose(
             2, 3
-        )  # (T', N, w, F)
+        )  # (N, T', w, F)
         lens_ = (lens - 1) // self.params.window_stride + 1
-        x = torch.nn.utils.rnn.pack_padded_sequence(x, lens_, enforce_sorted=False)
-        # fuse the T' and N dimension together for now. No sense in performing
+        x = torch.nn.utils.rnn.pack_padded_sequence(
+            x, lens_, batch_first=True, enforce_sorted=False
+        )
+        # fuse the N and T' dimension together for now. No sense in performing
         # convolutions on windows of entirely padding
         x, bs, si, ui = x.data, x.batch_sizes, x.sorted_indices, x.unsorted_indices
         x = self.lift(x).unsqueeze(1)  # (N', 1, w, F)
@@ -277,7 +279,7 @@ class AcousticModel(torch.nn.Module):
         x = torch.nn.utils.rnn.PackedSequence(
             x, batch_sizes=bs, sorted_indices=si, unsorted_indices=ui
         )
-        return torch.nn.utils.rnn.pad_packed_sequence(x)
+        return torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=False)
 
     def reset_parameters(self):
         if self.params.seed is not None:
