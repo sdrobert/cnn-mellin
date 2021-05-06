@@ -17,6 +17,7 @@ def test_train_command(temp_dir, device, populate_torch_dir):
         file_.write("[model]\n")
         file_.write("seed=1\n")
         file_.write("[training]\n")
+        file_.write("dropout_prob=0.05\n")
         file_.write("num_epochs=2\n")
         file_.write("seed=2\n")
     assert not get_torch_spect_data_dir_info(

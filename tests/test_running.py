@@ -28,13 +28,17 @@ class DummyAM(torch.nn.Module):
         self.lift.reset_parameters()
         self.fc.reset_parameters()
 
-    def forward(self, x, lens):
+    def forward(self, x, lens, dropout_prob=0.0, is_2d=True):
         x = self.fc(self.lift(x.transpose(0, 1)))
+        if is_2d:
+            x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)
+        else:
+            x = torch.nn.functional.dropout(x, dropout_prob, self.training)
         return x, lens
 
 
 def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
-    C, V, F = 50, 10, 5
+    C, V, F, p = 50, 10, 5, 0.1
     data_dir = os.path.join(temp_dir, "data")
     state_dir = os.path.join(temp_dir, "state")
     state_csv = os.path.join(temp_dir, "state.csv")
@@ -44,7 +48,7 @@ def test_train_am_for_epoch(temp_dir, device, populate_torch_dir):
     )
     model = DummyAM(F, V + 1, models.AcousticModelParams())
     controller = training.TrainingStateController(
-        running.MyTrainingStateParams(seed=0),
+        running.MyTrainingStateParams(seed=0, dropout_prob=p),
         state_csv_path=state_csv,
         state_dir=state_dir,
     )

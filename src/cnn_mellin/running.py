@@ -29,7 +29,13 @@ class MyTrainingStateParams(training.TrainingStateParams):
         doc="Which method of gradient descent to perform",
     )
     dropout_prob = param.Magnitude(
-        0.0, softbounds=(0.0, 0.5), doc="The model dropout probability"
+        0.0,
+        softbounds=(0.0, 0.5),
+        inclusive_bounds=(True, False),
+        doc="The model dropout probability for all layers",
+    )
+    convolutional_dropout_2d = param.Boolean(
+        True, doc="If true, zero out channels instead of individual coefficients"
     )
     max_time_warp = param.Number(
         80.0,
@@ -45,20 +51,21 @@ class MyTrainingStateParams(training.TrainingStateParams):
     )
     max_time_mask = param.Integer(
         100,
-        bounds=(0, None),
-        softbounds=(0, 200),
+        bounds=(1, None),
+        softbounds=(1, 200),
         doc="SpecAugment absolute upper bound on sequential frames in time to mask per "
         "mask",
     )
     max_freq_mask = param.Integer(
         27,
-        bounds=(0, None),
-        softbounds=(0, 40),
+        bounds=(1, None),
+        softbounds=(1, 40),
         doc="SpecAgument max number of coefficients in frequency to mask per mask",
     )
     max_time_mask_proportion = param.Magnitude(
         0.04,
-        softbounds=(0.0, 0.1),
+        softbounds=(0.01, 0.1),
+        inclusive_bounds=(False, False),
         doc="SpecAugment relative upper bound on the number of sequential frames in "
         "time to mask per mask",
     )
@@ -70,7 +77,8 @@ class MyTrainingStateParams(training.TrainingStateParams):
     )
     num_time_mask_proportion = param.Magnitude(
         0.04,
-        softbounds=(0.0, 0.1),
+        softbounds=(0.01, 0.1),
+        inclusive_bounds=(False, False),
         doc="SpecAugment relative upper bound on the number of temporal masks to apply",
     )
     num_freq_mask = param.Integer(
@@ -83,16 +91,17 @@ class MyTrainingStateParams(training.TrainingStateParams):
     @classmethod
     def get_tunable(cls):
         return super().get_tunable() | {
-            "optimizer",
+            "convolutional_dropout_2d",
             "dropout_prob",
-            "max_time_warp",
-            "max_freq_warp",
-            "max_time_mask",
             "max_freq_mask",
+            "max_freq_warp",
             "max_time_mask_proportion",
-            "num_time_mask",
-            "num_time_mask_proportion",
+            "max_time_mask",
+            "max_time_warp",
             "num_freq_mask",
+            "num_time_mask_proportion",
+            "num_time_mask",
+            "optimizer",
         }
 
     @classmethod
@@ -107,7 +116,8 @@ class MyTrainingStateParams(training.TrainingStateParams):
             hasattr(trial, "study") and "raw" in trial.study.user_attrs
         ):
             params.max_freq_warp = params.max_time_warp = 0.0
-            params.max_freq_mask = params.num_freq_mask = 0
+            params.max_freq_mask = 1
+            params.num_freq_mask = 0
             for tunable in {
                 "max_time_warp",
                 "max_freq_warp",
@@ -162,11 +172,12 @@ class MyTrainingStateParams(training.TrainingStateParams):
         check_and_set("num_freq_mask")
         if params.num_time_mask:
             check_and_set("num_time_mask_proportion")
-            if params.num_time_mask_proportion:
-                check_and_set("max_time_mask", True)
-                check_and_set("max_time_mask_proportion")
+            check_and_set("max_time_mask", True)
+            check_and_set("max_time_mask_proportion")
         if params.num_freq_mask:
             check_and_set("max_freq_mask")
+        if params.dropout_prob:
+            check_and_set("convolutional_dropout_2d")
 
         return params
 
@@ -202,7 +213,6 @@ def train_am_for_epoch(
     if epoch == 1 or (controller.state_dir and controller.state_csv_path):
         controller.load_model_and_optimizer_for_epoch(model, optimizer, epoch - 1, True)
 
-    model.dropout = params.dropout_prob
     model.train()
 
     loss_fn = torch.nn.CTCLoss(blank=model.target_dim - 1, zero_infinity=True)
@@ -238,7 +248,9 @@ def train_am_for_epoch(
         if refs.dim() == 3:
             refs = refs[..., 0]
         feats = spec_augment(feats, feat_lens)
-        logits, lens = model(feats, feat_lens)
+        logits, lens = model(
+            feats, feat_lens, params.dropout_prob, params.convolutional_dropout_2d
+        )
         logits = torch.nn.functional.log_softmax(logits, 2)
         loss = loss_fn(logits, refs, lens, ref_lens)
         loss.backward()
@@ -396,6 +408,16 @@ def train_am(
     epoch_callbacks: Sequence[Callable[[int, float, float], Any]] = tuple(),
     quiet: bool = True,
 ) -> Tuple[models.AcousticModel, float]:
+
+    if (
+        training_params.num_epochs is None
+        and not training_params.early_stopping_threshold
+    ):
+        raise ValueError(
+            "Number of epochs not set with no early stopping threshold. Training would "
+            "continue forever. If this is what you want, set num_epochs to something "
+            "really high"
+        )
 
     device = torch.device(device)
 

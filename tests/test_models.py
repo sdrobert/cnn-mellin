@@ -27,6 +27,7 @@ def test_model_parameters_are_same_after_seeded_reset():
 @pytest.mark.parametrize("freq_factor", [1, 2])
 @pytest.mark.parametrize("factor_sched", [1, 2])
 @pytest.mark.parametrize("convolutional_layers", [0, 5])
+@pytest.mark.parametrize("recurrent_layers", [0, 2])
 @pytest.mark.parametrize("bidirectional", [True, False])
 def test_can_run(
     mellin,
@@ -37,23 +38,25 @@ def test_can_run(
     freq_factor,
     factor_sched,
     convolutional_layers,
+    recurrent_layers,
     bidirectional,
     device,
 ):
     T, N, F, Y = 30, 50, 40, 10
     params = models.AcousticModelParams(
         seed=5,
-        mellin=mellin,
+        convolutional_mellin=mellin,
         window_size=window_size,
         window_stride=window_stride,
         recurrent_type=rnn,
-        time_factor=time_factor,
-        freq_factor=freq_factor,
-        factor_sched=factor_sched,
+        convolutional_time_factor=time_factor,
+        convolutional_freq_factor=freq_factor,
+        convolutional_factor_sched=factor_sched,
         initial_channels=3,
         channel_factor=2,
         convolutional_layers=convolutional_layers,
-        bidirectional=bidirectional,
+        recurrent_layers=recurrent_layers,
+        recurrent_bidirectional=bidirectional,
     )
     model = models.AcousticModel(F, Y, params).to(device)
     x = torch.rand((N, T, F), device=device)
@@ -65,6 +68,32 @@ def test_can_run(
     assert lens_.dim() == 1
     assert lens_.size(0) == N
     y.sum().backward()
+
+
+@pytest.mark.parametrize("is_2d", [True, False])
+def test_dropout(device, is_2d):
+    T, N, F, Y, p = 15, 40, 20, 11, 0.5
+    model = models.AcousticModel(F, Y, models.AcousticModelParams()).to(device)
+    x = torch.rand((N, T, F), device=device)
+    lens = torch.randint(1, T + 1, size=(N,), device=device)
+    torch.manual_seed(1)
+    logits_a, lens_a = model(x, lens, p, is_2d)
+    logits_a = torch.nn.utils.rnn.pack_padded_sequence(
+        logits_a, lens_a, enforce_sorted=False
+    )
+    logits_b, lens_b = model(x, lens, p, is_2d)
+    logits_b = torch.nn.utils.rnn.pack_padded_sequence(
+        logits_b, lens_b, enforce_sorted=False
+    )
+    assert (lens_a == lens_b).all()
+    assert not torch.allclose(logits_a.data, logits_b.data, atol=1e-5)
+    torch.manual_seed(1)
+    logits_c, lens_c = model(x, lens, p, is_2d)
+    logits_c = torch.nn.utils.rnn.pack_padded_sequence(
+        logits_c, lens_c, enforce_sorted=False
+    )
+    assert (lens_a == lens_c).all()
+    assert torch.allclose(logits_a.data, logits_c.data)
 
 
 @pytest.mark.parametrize("window_size", [1, 10, 100], ids=("win1", "win10", "win100"))
@@ -82,7 +111,7 @@ def test_padding_yields_same_gradients(
         window_size=window_size,
         window_stride=window_stride,
         convolutional_layers=convolutional_layers,
-        mellin=True,
+        convolutional_mellin=mellin,
     )
     model = models.AcousticModel(F, Y, params).to(device)
     parameters = list(model.parameters())

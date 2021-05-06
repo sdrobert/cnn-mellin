@@ -43,7 +43,7 @@ class AcousticModelParams(param.Parameterized):
         softbounds=(1, 10),
         doc="The width of convolutional kernels along the frequency dimension",
     )
-    initial_channels = param.Integer(
+    convolutional_initial_channels = param.Integer(
         64,
         bounds=(1, None),
         softbounds=(1, 256),
@@ -54,6 +54,46 @@ class AcousticModelParams(param.Parameterized):
         bounds=(0, None),
         softbounds=(0, 20),
         doc="The number of layers in the convolutional part of the network",
+    )
+    convolutional_mellin = param.Boolean(
+        False,
+        doc="Whether the convolutional layers are mellin-linear (versus just linear)",
+    )
+    convolutional_time_factor = param.Integer(
+        2,
+        bounds=(1, None),
+        softbounds=(1, 5),
+        doc="The factor by which to reduce the size of the input along the "
+        "time dimension between convolutional layers",
+    )
+    convolutional_freq_factor = param.Integer(
+        1,
+        bounds=(1, None),
+        softbounds=(1, 5),
+        doc="The factor by which to reduce the size of the input along the "
+        "frequency dimension after convolutional_factor_schedule layers",
+    )
+    convolutional_channel_factor = param.Integer(
+        1,
+        bounds=(1, None),
+        softbounds=(1, 5),
+        doc="The factor by which to increase the size of the channel dimension after "
+        "convolutional_factor_schedule layers",
+    )
+    convolutional_factor_schedule = param.Integer(
+        2,
+        bounds=(1, None),
+        doc="The number of convolutional layers after the first layer before "
+        "we modify the size of the time and frequency dimensions",
+    )
+    convolutional_nonlinearity = param.ObjectSelector(
+        torch.nn.functional.relu,
+        objects={
+            "relu": torch.nn.functional.relu,
+            "sigmoid": torch.nn.functional.sigmoid,
+            "tanh": torch.nn.functional.tanh,
+        },
+        doc="The pointwise convolutional_nonlinearity between convolutional layers",
     )
     recurrent_size = param.Integer(
         128,
@@ -72,78 +112,34 @@ class AcousticModelParams(param.Parameterized):
         objects={"LSTM": torch.nn.LSTM, "GRU": torch.nn.GRU, "RNN": torch.nn.RNN},
         doc="The type of recurrent cell in the recurrent part of the network ",
     )
-    bidirectional = param.Boolean(
+    recurrent_bidirectional = param.Boolean(
         True, doc="Whether the recurrent layers are bidirectional"
-    )
-    mellin = param.Boolean(
-        False,
-        doc="Whether the convolutional layers are mellin-linear (versus just linear)",
-    )
-    time_factor = param.Integer(
-        2,
-        bounds=(1, None),
-        softbounds=(1, 5),
-        doc="The factor by which to reduce the size of the input along the "
-        "time dimension between convolutional layers",
-    )
-    freq_factor = param.Integer(
-        1,
-        bounds=(1, None),
-        softbounds=(1, 5),
-        doc="The factor by which to reduce the size of the input along the "
-        "frequency dimension after factor_sched layers",
-    )
-    channel_factor = param.Integer(
-        1,
-        bounds=(1, None),
-        softbounds=(1, 5),
-        doc="The factor by which to increase the size of the channel dimension after "
-        "factor_sched layers",
-    )
-    factor_sched = param.Integer(
-        2,
-        bounds=(1, None),
-        doc="The number of convolutional layers after the first layer before "
-        "we modify the size of the time and frequency dimensions",
-    )
-    convolutional_nonlinearity = param.ObjectSelector(
-        torch.nn.functional.relu,
-        objects={
-            "relu": torch.nn.functional.relu,
-            "sigmoid": torch.nn.functional.sigmoid,
-            "tanh": torch.nn.functional.tanh,
-        },
-        doc="The pointwise convolutional_nonlinearity between convolutional layers",
     )
     seed = param.Integer(
         None,
         doc="Seed used for weight initialization. If unset, does not change "
         "the torch stream",
     )
-    convolutional_dropout_2d = param.Boolean(
-        True, doc="If true, zero out channels instead of individual coefficients"
-    )
 
     @classmethod
     def get_tunable(cls):
         return {
+            "convolutional_channel_factor",
+            "convolutional_factor_schedule",
+            "convolutional_freq_factor",
+            "convolutional_initial_channels",
+            "convolutional_kernel_freq",
+            "convolutional_kernel_time",
+            "convolutional_layers",
+            "convolutional_mellin",
+            "convolutional_nonlinearity",
+            "convolutional_time_factor",
+            "recurrent_bidirectional",
+            "recurrent_layers",
+            "recurrent_size",
+            "recurrent_type",
             "window_size",
             "window_stride",
-            "convolutional_kernel_time",
-            "convolutional_kernel_freq",
-            "initial_channels",
-            "convolutional_layers",
-            "recurrent_size",
-            "recurrent_layers",
-            "recurrent_type",
-            "bidirectional",
-            "mellin",
-            "time_factor",
-            "freq_factor",
-            "channel_factor",
-            "factor_sched",
-            "convolutional_nonlinearity",
-            "convolutional_dropout_2d",
         }
 
     @classmethod
@@ -157,8 +153,8 @@ class AcousticModelParams(param.Parameterized):
         if "raw" in trial.user_attrs or (
             hasattr(trial, "study") and "raw" in trial.study.user_attrs
         ):
-            params.convolutional_kernel_freq = params.freq_factor = 1
-            for tunable in {"convolutional_kernel_freq", "freq_factor"}:
+            params.convolutional_kernel_freq = params.convolutional_freq_factor = 1
+            for tunable in {"convolutional_kernel_freq", "convolutional_freq_factor"}:
                 if tunable in only:
                     warnings.warn(
                         f"Removing '{tunable}' from list of tunable hyperparameters "
@@ -204,20 +200,21 @@ class AcousticModelParams(param.Parameterized):
         check_and_set("convolutional_layers", False)
         check_and_set("recurrent_layers", False)
         if params.convolutional_layers:
-            check_and_set("mellin")
+            check_and_set("convolutional_mellin")
             check_and_set("convolutional_kernel_time", True)
             check_and_set("convolutional_kernel_freq", True)
-            check_and_set("initial_channels", False, True)
-            check_and_set("factor_sched", high=params.convolutional_layers + 1)
-            check_and_set("convolutional_dropout_2d")
+            check_and_set("convolutional_initial_channels", False, True)
+            check_and_set(
+                "convolutional_factor_schedule", high=params.convolutional_layers + 1
+            )
             check_and_set("convolutional_nonlinearity")
-            if params.factor_sched <= params.convolutional_layers:
-                check_and_set("time_factor", False, True)
-                check_and_set("freq_factor", False, True)
-                check_and_set("channel_factor", False, True)
+            if params.convolutional_factor_schedule <= params.convolutional_layers:
+                check_and_set("convolutional_time_factor", False, True)
+                check_and_set("convolutional_freq_factor", False, True)
+                check_and_set("convolutional_channel_factor", False, True)
         if params.recurrent_layers:
             check_and_set("recurrent_size", False, True)
-            check_and_set("bidirectional")
+            check_and_set("recurrent_bidirectional")
             check_and_set("recurrent_type")
 
         return params
@@ -226,15 +223,18 @@ class AcousticModelParams(param.Parameterized):
 class AcousticModel(torch.nn.Module):
     """The acoustic model
 
-    Expects input `x` of shape ``(T, N, audio_dim)`` representing the batched audio
-    signals and `lens` of shape ``(N,)`` of the lengths of each audio sequence in the
-    batch. Returns `y` of shape ``(T', N, target_dim)`` and ``lens_`` of shape ``N``,
-    where
+    The acoustic model has a call signature
+
+        model(x, lens[, dropout_prob=float][, convolutional_dropout_is_2d=bool])
+
+    `x` is of shape ``(T, N, freq_dim)`` representing the batched audio signals and
+    `lens` of shape ``(N,)`` of the lengths of each audio sequence in the batch. Returns
+    `y` of shape ``(T', N, target_dim)`` and ``lens_`` of shape ``N``, where
 
         lens_[n] = (lens[n] - 1) // params.window_stride + 1
 
     Represents the new lengths of audio sequences based on the number of windows that
-    were extracted.
+    were extracted. `dropout_prob` is
 
     Parameters
     ----------
@@ -243,6 +243,9 @@ class AcousticModel(torch.nn.Module):
     target_dim : int
         The number of types in the output vocabulary (including blanks)
     params : AcousticModelParams
+
+    Attributes
+    ----------
     """
 
     def __init__(self, freq_dim: int, target_dim: int, params: AcousticModelParams):
@@ -253,25 +256,18 @@ class AcousticModel(torch.nn.Module):
         self.target_dim = target_dim
 
         self.convs = torch.nn.ModuleList([])
-        self.drops = torch.nn.ModuleList([])
-        self._drop_p = 0.0
-
-        if params.convolutional_dropout_2d:
-            Dropout = torch.nn.Dropout2d
-        else:
-            Dropout = torch.nn.Dropout
 
         kx = params.convolutional_kernel_time
         ky = params.convolutional_kernel_freq
         ci = 1
         y = freq_dim
-        co = params.initial_channels
-        up_c = params.channel_factor
-        decim_x = params.time_factor
-        on_sy = params.freq_factor
+        co = params.convolutional_initial_channels
+        up_c = params.convolutional_channel_factor
+        decim_x = params.convolutional_time_factor
+        on_sy = params.convolutional_freq_factor
         py = (ky - 1) // 2
         off_s = dy = off_dx = 1
-        if params.mellin:
+        if params.convolutional_mellin:
             # the equation governing the size of the output on a mellin dimension is
             # x' = ceil((p + 1)(x' + u - 1)/(k + d - 1)) - (s - 1) + r
             # to reproduce the same size output, set p = k - 1, d = 1, s = 1, r = 0,
@@ -295,11 +291,13 @@ class AcousticModel(torch.nn.Module):
             px = (kx - 1) // 2
             on_dx = 1
         for layer_no in range(1, params.convolutional_layers + 1):
-            if layer_no % params.factor_sched:  # "off:" not adjusting output size
+            if (
+                layer_no % params.convolutional_factor_schedule
+            ):  # "off:" not adjusting output size
                 dx, sx, sy = off_dx, off_s, off_s
             else:  # "on:" adjusting output size
                 dx, sx, sy, co = on_dx, on_sx, on_sy, up_c * co
-            if params.mellin:
+            if params.convolutional_mellin:
                 self.convs.append(
                     MellinLinearCorrelation(
                         ci,
@@ -318,7 +316,6 @@ class AcousticModel(torch.nn.Module):
                 )
                 y = (y + 2 * py - ky) // sy + 1
             ci = co
-            self.drops.append(Dropout(p=0.0))
         # flatten the channel dimension (ci) into the frequency dimension (y)
         prev_size = ci * y
         if params.recurrent_layers:
@@ -327,10 +324,12 @@ class AcousticModel(torch.nn.Module):
                 hidden_size=params.recurrent_size,
                 num_layers=params.recurrent_layers,
                 dropout=0.0,
-                bidirectional=params.bidirectional,
+                bidirectional=params.recurrent_bidirectional,
                 batch_first=False,
             )
-            prev_size = params.recurrent_size * (2 if params.bidirectional else 1)
+            prev_size = params.recurrent_size * (
+                2 if params.recurrent_bidirectional else 1
+            )
         else:
             self.rnn = None
         self.out = torch.nn.Linear(prev_size, target_dim)
@@ -353,7 +352,11 @@ class AcousticModel(torch.nn.Module):
             raise RuntimeError(str_)
 
     def forward(
-        self, x: torch.Tensor, lens: torch.Tensor
+        self,
+        x: torch.Tensor,
+        lens: torch.Tensor,
+        dropout_prob: float = 0.0,
+        dropout_is_2d: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         self.check_input(x, lens)
         # zero the input past lens to ensure no weirdness
@@ -378,8 +381,12 @@ class AcousticModel(torch.nn.Module):
         # convolutions on windows of entirely padding
         x, bs, si, ui = x.data, x.batch_sizes, x.sorted_indices, x.unsorted_indices
         x = self.lift(x).unsqueeze(1)  # (N', 1, w, F)
-        for conv, drop in zip(self.convs, self.drops):
-            x = drop(self.params.convolutional_nonlinearity(conv(x)))  # (N', co, w',F')
+        for conv in self.convs:
+            x = self.params.convolutional_nonlinearity(conv(x))  # (N', co, w',F')
+            if dropout_is_2d:
+                x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)
+            else:
+                x = torch.nn.functional.dropout(x, dropout_prob, self.training)
         x = x.sum(2).view(x.size(0), -1)  # (N', co * F')
         if self.rnn is not None:
             x = self.rnn(
@@ -403,16 +410,3 @@ class AcousticModel(torch.nn.Module):
             self.convs,
         ):
             layer.reset_parameters()
-
-    @property
-    def dropout(self):
-        # there's a possibility of no dropout layers at all, which is why
-        # we keep track of it as a simple variable
-        return self._drop_p
-
-    @dropout.setter
-    def dropout(self, p):
-        for layer in self.drops:
-            layer.p = p
-        self.rnn.dropout = p
-        self._drop_p = p
