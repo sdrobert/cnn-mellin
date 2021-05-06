@@ -1,19 +1,243 @@
-"""Utilities for hyperparameter optimization"""
-
 import os
-import heapq
+from typing import Optional, Union
 import warnings
 
-from itertools import chain
-from time import time
-
-import optuna
-import param
-import pydrobert.torch.data as data
-import numpy as np
-import cnn_mellin.models as models
-import cnn_mellin.running as running
 import torch
+import optuna
+import pydrobert.param.optuna as poptuna
+import pydrobert.param.serialization as serialization
+import pydrobert.torch.data as data
+import cnn_mellin.running as running
+import cnn_mellin.models as models
+import sqlalchemy.engine.url
+
+
+def init_study(
+    train_dir: str,
+    param_dict: dict,
+    out_url: Union[str, sqlalchemy.engine.url.URL],
+    only: set,
+    study_name: Optional[str] = None,
+    dev_prop: float = 0.25,
+    mem_limit: int = 6 * (1024 ** 3),
+) -> optuna.Study:
+    only = set(only)  # non-destructive
+
+    out_url = sqlalchemy.engine.url.make_url(out_url)
+    if out_url.database is None:
+        raise ValueError(f"'{out_url}' database path is invalid or empty")
+    if study_name is None:
+        study_name = os.path.basename(out_url.database).split(".")[0]
+    train_dir = os.path.abspath(train_dir)
+    num_filts, num_classes = running.get_filts_and_classes(train_dir)
+    raw = num_filts == 1
+
+    if (
+        param_dict["training"].num_epochs is None
+        and not param_dict["training"].early_stopping_threshold
+        and "training.num_epochs" not in only
+        and "training.early_stopping_threshold" not in only
+    ):
+        raise ValueError(
+            "A trial has no way to stop. Set either training.num_epochs or "
+            "training.early_stopping_threshold"
+        )
+
+    # determine things that won't make sense to train
+    if raw:
+        _chuck_set_from_only(
+            only,
+            {
+                "model.convolutional_kernel_freq",
+                "model.convolutional_freq_factor",
+                "training.max_time_warp",
+                "training.max_freq_warp",
+                "training.max_freq_mask",
+                "training.num_freq_mask",
+            },
+            "features are likely raw (only one coefficient)",
+        )
+    elif (
+        not param_dict["training"].num_freq_mask
+        and "training.num_freq_mask" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {"training.max_freq_mask"},
+            "training.num_freq_mask is 0 and not optimized",
+        )
+    if (
+        not param_dict["training"].num_time_mask
+        and "training.num_time_mask" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {
+                "training.num_time_mask_proportion",
+                "training.max_time_mask",
+                "training.max_time_mask_proportion",
+            },
+            "training.num_time_mask is 0 and not optimized",
+        )
+    if (
+        not param_dict["model"].convolutional_layers
+        and "model.convolutional_layers" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {
+                "model.convolutional_mellin",
+                "model.convolutional_kernel_time",
+                "model.convolutional_kernel_freq",
+                "model.convolutional_initial_channels",
+                "model.convolutional_factor_sched",
+                "model.convolutional_time_factor",
+                "model.convolutional_freq_factor",
+                "model.convolutional_channel_factor",
+                "training.convolutional_dropout_2d",
+                "model.convolutional_nonlinearity",
+            },
+            "model.convolutional_layers is 0 and not optmized",
+        )
+    elif (
+        not param_dict["training"].dropout_prob and "training.dropout_prob" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {"training.convolutional_dropout_2d"},
+            "training.dropout_prob is 0 and not optimized",
+        )
+    if (
+        not param_dict["model"].recurrent_layers
+        and "model.recurrent_layers" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {
+                "model.recurrent_size",
+                "model.recurrent_bidirectional",
+                "model.recurrent_type",
+            },
+            "model.recurrent_layers is 0 and not optimized",
+        )
+    if (
+        not param_dict["training"].reduce_lr_threshold
+        and "training.reduce_lr_threshold" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {
+                "training.reduce_lr_factor",
+                "training.reduce_lr_patience",
+                "training.reduce_lr_cooldown",
+                "training.reduce_lr_burnin",
+            },
+            "training.reduce_lr_threshold is 0 and not optimized",
+        )
+    if (
+        not param_dict["training"].early_stopping_threshold
+        and "training.early_stopping_threshold" not in only
+    ):
+        _chuck_set_from_only(
+            only,
+            {"training.early_stopping_burnin", "training.early_stopping_patience"},
+            "training.early_stopping_threshold is 0 and not optimized",
+        )
+
+    # check that we have anything remaining
+    if not only:
+        raise ValueError("set 'only' cannot be empty (and cannot be reduced to empty)")
+    remainder = only - poptuna.get_param_dict_tunable(param_dict)
+    if remainder:
+        raise ValueError(
+            f"set 'only' contains elements {remainder} which are not valid parameters"
+        )
+
+    # determine what values to optimize given our restrictions
+    optimized_dicts = set()
+    for name_ in only:
+        optimized_dicts.add(name_.split(".")[0])
+    directions = ["minimize", "minimize"]
+    optimized_values = ["er", "wall_time"]
+    if "model" in optimized_dicts or "data" in optimized_dicts:
+        directions.append("minimize")
+        optimized_values.append("memory")
+    else:
+        warnings.warn(
+            "No model or data hyperparameters detected. Will not optimize memory usage"
+        )
+
+    # get some other user restrictions
+    ds = data.SpectDataSet(
+        train_dir,
+        subset_ids=param_dict["data"].subset_ids
+        if param_dict["data"].subset_ids
+        else None,
+    )
+    total_utts = len(ds)
+    num_train = int(total_utts * (1 - dev_prop))
+    num_dev = total_utts - num_train
+    if num_train < 1 or num_dev < 1:
+        raise ValueError(
+            f"Could not split {total_utts} utterances into {1 - dev_prop:%} "
+            f"({num_train}) training utterances and {dev_prop:%} ({num_dev}) dev "
+            "utterances"
+        )
+    train_ids = ds.utt_ids[:num_train]
+    dev_ids = ds.utt_ids[num_train:]
+    max_frames = max(x[0].size(0) for x in ds)
+    serialized = serialization.serialize_to_dict(param_dict)
+    del ds
+
+    study = optuna.create_study(
+        storage=str(out_url), study_name=study_name, directions=directions
+    )
+    if raw:
+        study.set_user_attr("raw", True)
+    study.set_user_attr("data_dir", train_dir)
+    study.set_user_attr("train_ids", train_ids)
+    study.set_user_attr("dev_ids", dev_ids)
+    study.set_user_attr("num_classes", num_classes)
+    study.set_user_attr("max_frames", max_frames)
+    study.set_user_attr("global_dict", serialized)
+    study.set_user_attr("num_filts", num_filts)
+    study.set_user_attr("optimized_values", optimized_values)
+    study.set_user_attr("mem_limit", mem_limit)
+    study.set_user_attr("only", sorted(only))
+    return study
+
+
+def _chuck_set_from_only(only: set, set_: set, reason: str):
+    for tunable in only & set_:
+        warnings.warn(
+            f"Removing {tunable} from list of optimized hyperparameters since {reason}"
+        )
+        only.remove(tunable)
+
+
+def get_train_memory(
+    param_dict: dict, num_filts: int, num_classes: int, max_frames: int
+) -> int:
+
+    model = models.AcousticModel(num_filts, num_classes + 1, param_dict["model"])
+    optim = param_dict["training"].optimizer(model.parameters(), lr=1e-4)
+    x = torch.empty(param_dict["data"].batch_size, max_frames, num_filts)
+    len_ = torch.full((param_dict["data"],), max_frames)
+
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True
+    ) as prof:
+        optim.zero_grad()
+        logits, out_len = model(
+            x,
+            len_,
+            param_dict["training"].dropout_prob,
+            param_dict["training"].convolutional_dropout_2d,
+        )
+        logits.sum().backward()
+    del model, optim, out_len, logits, x, len_
+
+    return prof.total_average().cpu_memory_usage
 
 
 # class ChainOrPruner(optuna.pruners.BasePruner):
@@ -31,11 +255,11 @@ import torch
 
 
 # OPTIM_BOUNDS = {
-#     "factor_sched": (1, 100),
-#     "freq_factor": (1, 4),
+#     "convolutional_factor_sched": (1, 100),
+#     "convolutional_freq_factor": (1, 4),
 #     "num_fc": (0, 5),
 #     "num_conv": (0, 10),
-#     "time_factor": (1, 4),
+#     "convolutional_time_factor": (1, 4),
 #     "early_stopping_threshold": (1e-5, 0.5),
 #     "early_stopping_patience": (1, 10),
 #     "early_stopping_burnin": (0, 10),
@@ -62,11 +286,11 @@ import torch
 #     "nonlinearity": "model",
 #     "flatten_style": "model",
 #     "mellin": "model",
-#     "factor_sched": "model",
-#     "freq_factor": "model",
+#     "convolutional_factor_sched": "model",
+#     "convolutional_freq_factor": "model",
 #     "mconv_decimation_strategy": "model",
 #     "dropout2d_on_conv": "model",
-#     "time_factor": "model",
+#     "convolutional_time_factor": "model",
 #     "kernel_sizes": "model",
 #     "hidden_sizes": "model",
 #     "early_stopping_threshold": "training",
@@ -788,21 +1012,21 @@ import torch
 #                 "mconv_decimation_strategy",
 #                 ("pad-then-dec", "pad-to-dec-time-floor", "pad-to-dec-time-ceil",),
 #             )
-#         if "factor_sched" in to_optimize:
-#             min_, max_ = OPTIM_BOUNDS["factor_sched"]
+#         if "convolutional_factor_sched" in to_optimize:
+#             min_, max_ = OPTIM_BOUNDS["convolutional_factor_sched"]
 #             max_ = min(max_, num_conv)
 #             if min_ <= max_:
-#                 model_params.factor_sched = trial.suggest_int(
-#                     "factor_sched", min_, max_
+#                 model_params.convolutional_factor_sched = trial.suggest_int(
+#                     "convolutional_factor_sched", min_, max_
 #                 )
-#         if model_params.factor_sched:
-#             if "freq_factor" in to_optimize:
-#                 model_params.freq_factor = trial.suggest_int(
-#                     "freq_factor", *OPTIM_BOUNDS["freq_factor"]
+#         if model_params.convolutional_factor_sched:
+#             if "convolutional_freq_factor" in to_optimize:
+#                 model_params.convolutional_freq_factor = trial.suggest_int(
+#                     "convolutional_freq_factor", *OPTIM_BOUNDS["convolutional_freq_factor"]
 #                 )
-#             if "time_factor" in to_optimize:
-#                 model_params.time_factor = trial.suggest_int(
-#                     "time_factor", *OPTIM_BOUNDS["time_factor"]
+#             if "convolutional_time_factor" in to_optimize:
+#                 model_params.convolutional_time_factor = trial.suggest_int(
+#                     "convolutional_time_factor", *OPTIM_BOUNDS["convolutional_time_factor"]
 #                 )
 #         if "dropout2d_on_conv" in to_optimize:
 #             model_params.dropout2d_on_conv = trial.suggest_categorical(

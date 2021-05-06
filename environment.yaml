@@ -12,6 +12,7 @@ dependencies:
   - pydrobert-speech=0.2.0
   - pydrobert-param=0.3.0
   - pydrobert-mellin=0.0.0
+  - mysql-connector-python
   - pip
   - pip: # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
     - "git+https://github.com/sdrobert/pydrobert-pytorch.git@df218d5358d53b3ee8daaf7a824e44205ae296ac"
