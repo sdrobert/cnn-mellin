@@ -116,3 +116,4 @@ data/
 exp/
 conf/slurm.conf
 .gitversion
+.vscode

@@ -1,5 +1,7 @@
 """Acoustic models"""
 
+import warnings
+
 from itertools import chain
 from typing import Tuple
 
@@ -20,26 +22,31 @@ class AcousticModelParams(param.Parameterized):
     window_size = param.Integer(
         10,
         bounds=(1, None),
+        softbounds=(2, 20),
         doc="The total number of audio elements per window in time",
     )
     window_stride = param.Integer(
         3,
         bounds=(1, None),
+        softbounds=(1, 5),
         doc="The number of audio elements over to shift for subsequent windows",
     )
-    kernel_time = param.Integer(
+    convolutional_kernel_time = param.Integer(
         3,
         bounds=(1, None),
+        softbounds=(1, 10),
         doc="The width of convolutional kernels along the time dimension",
     )
-    kernel_freq = param.Integer(
+    convolutional_kernel_freq = param.Integer(
         3,
         bounds=(1, None),
+        softbounds=(1, 10),
         doc="The width of convolutional kernels along the frequency dimension",
     )
     initial_channels = param.Integer(
         64,
         bounds=(1, None),
+        softbounds=(1, 256),
         doc="The number of channels in the initial convolutional layer",
     )
     convolutional_layers = param.Integer(
@@ -49,11 +56,15 @@ class AcousticModelParams(param.Parameterized):
         doc="The number of layers in the convolutional part of the network",
     )
     recurrent_size = param.Integer(
-        128, bounds=(1, None), doc="The size of each recurrent layer",
+        128,
+        bounds=(1, None),
+        softbounds=(64, 512),
+        doc="The size of each recurrent layer",
     )
     recurrent_layers = param.Integer(
         2,
         bounds=(0, None),
+        softbounds=(0, 20),
         doc="The number of recurrent layers in the recurrent part of the network",
     )
     recurrent_type = param.ObjectSelector(
@@ -71,18 +82,21 @@ class AcousticModelParams(param.Parameterized):
     time_factor = param.Integer(
         2,
         bounds=(1, None),
+        softbounds=(1, 5),
         doc="The factor by which to reduce the size of the input along the "
         "time dimension between convolutional layers",
     )
     freq_factor = param.Integer(
         1,
         bounds=(1, None),
+        softbounds=(1, 5),
         doc="The factor by which to reduce the size of the input along the "
         "frequency dimension after factor_sched layers",
     )
     channel_factor = param.Integer(
         1,
         bounds=(1, None),
+        softbounds=(1, 5),
         doc="The factor by which to increase the size of the channel dimension after "
         "factor_sched layers",
     )
@@ -92,14 +106,14 @@ class AcousticModelParams(param.Parameterized):
         doc="The number of convolutional layers after the first layer before "
         "we modify the size of the time and frequency dimensions",
     )
-    nonlinearity = param.ObjectSelector(
+    convolutional_nonlinearity = param.ObjectSelector(
         torch.nn.functional.relu,
         objects={
             "relu": torch.nn.functional.relu,
             "sigmoid": torch.nn.functional.sigmoid,
             "tanh": torch.nn.functional.tanh,
         },
-        doc="The pointwise nonlinearity between convolutional layers",
+        doc="The pointwise convolutional_nonlinearity between convolutional layers",
     )
     seed = param.Integer(
         None,
@@ -109,6 +123,104 @@ class AcousticModelParams(param.Parameterized):
     convolutional_dropout_2d = param.Boolean(
         True, doc="If true, zero out channels instead of individual coefficients"
     )
+
+    @classmethod
+    def get_tunable(cls):
+        return {
+            "window_size",
+            "window_stride",
+            "convolutional_kernel_time",
+            "convolutional_kernel_freq",
+            "initial_channels",
+            "convolutional_layers",
+            "recurrent_size",
+            "recurrent_layers",
+            "recurrent_type",
+            "bidirectional",
+            "mellin",
+            "time_factor",
+            "freq_factor",
+            "channel_factor",
+            "factor_sched",
+            "convolutional_nonlinearity",
+            "convolutional_dropout_2d",
+        }
+
+    @classmethod
+    def suggest_params(cls, trial, base=None, only=None, prefix=""):
+        if only is None:
+            only = cls.get_tunable()
+        only = set(only)  # copy to modify
+        params = cls() if base is None else base
+        pdict = params.param.params()
+        softbound_scale_factor = 1
+        if "raw" in trial.user_attrs or (
+            hasattr(trial, "study") and "raw" in trial.study.user_attrs
+        ):
+            params.convolutional_kernel_freq = params.freq_factor = 1
+            for tunable in {"convolutional_kernel_freq", "freq_factor"}:
+                if tunable in only:
+                    warnings.warn(
+                        f"Removing '{tunable}' from list of tunable hyperparameters "
+                        "because input is raw"
+                    )
+                    only.remove(tunable)
+            # defaults are based on 10ms shift; with 16000 samps/sec, the same length
+            # is 100 times
+            softbound_scale_factor = 100
+
+        def check_and_set(
+            name, use_scale_factor=False, use_log=False, low=None, high=None
+        ):
+            if name not in only:
+                return
+            entry = pdict[name]
+            deft = getattr(params, name)
+            if isinstance(entry, param.Number):
+                if low is None:
+                    low = entry.get_soft_bounds()[0]
+                    assert low is not None
+                if high is None:
+                    high = entry.get_soft_bounds()[1]
+                if use_scale_factor:
+                    low *= softbound_scale_factor
+                    high *= softbound_scale_factor
+                if isinstance(deft, int):
+                    val = trial.suggest_int(prefix + name, low, high, log=use_log)
+                else:
+                    val = trial.suggest_float(prefix + name, low, high, log=use_log)
+            elif isinstance(entry, param.Boolean):
+                val = trial.suggest_categorical(prefix + name, (True, False))
+            elif isinstance(entry, param.ObjectSelector):
+                range_ = entry.get_range()
+                key = trial.suggest_categorical(prefix + name, tuple(range_))
+                val = range_[key]
+            else:
+                assert False
+            setattr(params, name, val)
+
+        check_and_set("window_size", True)
+        check_and_set("window_stride", True)
+        check_and_set("convolutional_layers", False)
+        check_and_set("recurrent_layers", False)
+        if params.convolutional_layers:
+            check_and_set("mellin")
+            check_and_set("convolutional_kernel_time", True)
+            check_and_set("convolutional_kernel_freq", True)
+            check_and_set("initial_channels", False, True)
+            check_and_set("factor_sched", high=params.convolutional_layers + 1)
+            check_and_set("convolutional_dropout_2d")
+            check_and_set("convolutional_nonlinearity")
+            if params.factor_sched <= params.convolutional_layers:
+                check_and_set("time_factor", False, True)
+                check_and_set("freq_factor", False, True)
+                check_and_set("channel_factor", False, True)
+        if params.recurrent_layers:
+            check_and_set("recurrent_size", False, True)
+            check_and_set("bidirectional")
+            check_and_set("recurrent_type")
+
+        return params
 
 
 class AcousticModel(torch.nn.Module):
@@ -149,8 +261,8 @@ class AcousticModel(torch.nn.Module):
         else:
             Dropout = torch.nn.Dropout
 
-        kx = params.kernel_time
-        ky = params.kernel_freq
+        kx = params.convolutional_kernel_time
+        ky = params.convolutional_kernel_freq
         ci = 1
         y = freq_dim
         co = params.initial_channels
@@ -267,7 +379,7 @@ class AcousticModel(torch.nn.Module):
         x, bs, si, ui = x.data, x.batch_sizes, x.sorted_indices, x.unsorted_indices
         x = self.lift(x).unsqueeze(1)  # (N', 1, w, F)
         for conv, drop in zip(self.convs, self.drops):
-            x = drop(self.params.nonlinearity(conv(x)))  # (N', co, w', F')
+            x = drop(self.params.convolutional_nonlinearity(conv(x)))  # (N', co, w',F')
         x = x.sum(2).view(x.size(0), -1)  # (N', co * F')
         if self.rnn is not None:
             x = self.rnn(

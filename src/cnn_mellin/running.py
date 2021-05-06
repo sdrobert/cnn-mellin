@@ -2,6 +2,7 @@
 
 import os
 import sys
+import warnings
 
 from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
@@ -27,47 +28,147 @@ class MyTrainingStateParams(training.TrainingStateParams):
         },
         doc="Which method of gradient descent to perform",
     )
-    dropout_prob = param.Magnitude(0.0, doc="The model dropout probability")
+    dropout_prob = param.Magnitude(
+        0.0, softbounds=(0.0, 0.5), doc="The model dropout probability"
+    )
     max_time_warp = param.Number(
         80.0,
         bounds=(0.0, None),
+        softbounds=(0.0, 100.0),
         doc="SpecAugment max time dimension warp during training",
     )
     max_freq_warp = param.Number(
         0.0,
         bounds=(0.0, None),
+        softbounds=(0.0, 40.0),
         doc="SpecAugment max frequency dimension warp during training",
     )
     max_time_mask = param.Integer(
         100,
         bounds=(0, None),
+        softbounds=(0, 200),
         doc="SpecAugment absolute upper bound on sequential frames in time to mask per "
         "mask",
     )
     max_freq_mask = param.Integer(
         27,
         bounds=(0, None),
+        softbounds=(0, 40),
         doc="SpecAgument max number of coefficients in frequency to mask per mask",
     )
     max_time_mask_proportion = param.Magnitude(
         0.04,
+        softbounds=(0.0, 0.1),
         doc="SpecAugment relative upper bound on the number of sequential frames in "
         "time to mask per mask",
     )
     num_time_mask = param.Integer(
         20,
         bounds=(0, None),
+        softbounds=(0, 40),
         doc="SpecAgument absolute upper bound on the number of temporal masks to apply",
     )
     num_time_mask_proportion = param.Magnitude(
         0.04,
+        softbounds=(0.0, 0.1),
         doc="SpecAugment relative upper bound on the number of temporal masks to apply",
     )
     num_freq_mask = param.Integer(
         2,
         bounds=(0, None),
+        softbounds=(0, 5),
         doc="SpecAugment maximum number of frequency masks to apply",
     )
+
+    @classmethod
+    def get_tunable(cls):
+        return super().get_tunable() | {
+            "optimizer",
+            "dropout_prob",
+            "max_time_warp",
+            "max_freq_warp",
+            "max_time_mask",
+            "max_freq_mask",
+            "max_time_mask_proportion",
+            "num_time_mask",
+            "num_time_mask_proportion",
+            "num_freq_mask",
+        }
+
+    @classmethod
+    def suggest_params(cls, trial, base, only, prefix):
+        if only is None:
+            only = cls.get_tunable()
+        only = set(only)
+        params = super().suggest_params(trial, base=base, only=only, prefix=prefix)
+        pdict = params.param.params()
+        softbound_scale_factor = 1
+        if "raw" in trial.user_attrs or (
+            hasattr(trial, "study") and "raw" in trial.study.user_attrs
+        ):
+            params.max_freq_warp = params.max_time_warp = 0.0
+            params.max_freq_mask = params.num_freq_mask = 0
+            for tunable in {
+                "max_time_warp",
+                "max_freq_warp",
+                "max_freq_mask",
+                "num_freq_mask",
+            }:
+                if tunable in only:
+                    warnings.warn(
+                        f"Removing '{tunable}' from list of tunable hyperparameters "
+                        "because input is raw"
+                    )
+                    only.remove(tunable)
+            # defaults are based on 10ms shift; with 16000 samps/sec, the same length
+            # is 100 times
+            softbound_scale_factor = 100
+
+        def check_and_set(
+            name, use_scale_factor=False, use_log=False, low=None, high=None
+        ):
+            if name not in only:
+                return
+            entry = pdict[name]
+            deft = getattr(params, name)
+            if isinstance(entry, param.Number):
+                if low is None:
+                    low = entry.get_soft_bounds()[0]
+                    assert low is not None
+                if high is None:
+                    high = entry.get_soft_bounds()[1]
+                if use_scale_factor:
+                    low *= softbound_scale_factor
+                    high *= softbound_scale_factor
+                if isinstance(deft, int):
+                    val = trial.suggest_int(prefix + name, low, high, log=use_log)
+                else:
+                    val = trial.suggest_float(prefix + name, low, high, log=use_log)
+            elif isinstance(entry, param.Boolean):
+                val = trial.suggest_categorical(prefix + name, (True, False))
+            elif isinstance(entry, param.ObjectSelector):
+                range_ = entry.get_range()
+                key = trial.suggest_categorical(prefix + name, tuple(range_))
+                val = range_[key]
+            else:
+                assert False
+            setattr(params, name, val)
+
+        check_and_set("optimizer")
+        check_and_set("dropout_prob")
+        check_and_set("max_time_warp", True)
+        check_and_set("max_freq_warp")
+        check_and_set("num_time_mask", True)
+        check_and_set("num_freq_mask")
+        if params.num_time_mask:
+            check_and_set("num_time_mask_proportion")
+            if params.num_time_mask_proportion:
+                check_and_set("max_time_mask", True)
+                check_and_set("max_time_mask_proportion")
+        if params.num_freq_mask:
+            check_and_set("max_freq_mask")
+
+        return params
 
 
 def train_am_for_epoch(
@@ -136,7 +237,7 @@ def train_am_for_epoch(
         optimizer.zero_grad()
         if refs.dim() == 3:
             refs = refs[..., 0]
-        feats = spec_augment(feats)
+        feats = spec_augment(feats, feat_lens)
         logits, lens = model(feats, feat_lens)
         logits = torch.nn.functional.log_softmax(logits, 2)
         loss = loss_fn(logits, refs, lens, ref_lens)
