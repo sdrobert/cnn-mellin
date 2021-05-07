@@ -18,7 +18,7 @@ def init_study(
     out_url: Union[str, sqlalchemy.engine.url.URL],
     only: set,
     study_name: Optional[str] = None,
-    dev_prop: float = 0.25,
+    dev_prop: float = 0.1,
     mem_limit: int = 6 * (1024 ** 3),
 ) -> optuna.Study:
     only = set(only)  # non-destructive

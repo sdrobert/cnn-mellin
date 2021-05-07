@@ -1,5 +1,7 @@
 import os
 
+import optuna
+import pytest
 import torch
 import cnn_mellin.command_line as command_line
 from pydrobert.torch.command_line import get_torch_spect_data_dir_info
@@ -59,3 +61,37 @@ def test_train_command(temp_dir, device, populate_torch_dir):
             assert torch.allclose(v1, v2), key
         else:
             assert v1 == v2, key
+
+
+@pytest.mark.cpu
+def test_optim_init_command(temp_dir, populate_torch_dir):
+    C, F, V = 50, 5, 11
+    train_dir = os.path.join(temp_dir, "train")
+    populate_torch_dir(train_dir, C, num_filts=F, max_class=V - 1)
+    ext_dir = os.path.join(temp_dir, "ext")
+    os.makedirs(ext_dir)
+    ini_file = os.path.join(temp_dir, "cfg.ini")
+    with open(ini_file, "w") as file_:
+        file_.write("[training]\n")
+        file_.write("early_stopping_threshold=0.1\n")
+    assert not get_torch_spect_data_dir_info(
+        [train_dir, os.path.join(ext_dir, "train.info.ark")]
+    )
+    db_file = os.path.join(temp_dir, "optimize.db")
+    db_url = "sqlite:///" + db_file
+    assert not command_line.cnn_mellin(
+        [
+            "--read-ini",
+            ini_file,
+            "optim",
+            db_url,
+            "init",
+            train_dir,
+            "--whitelist",
+            r"model\..*",
+        ]
+    )
+    study = optuna.load_study("optimize", db_url)
+    only = set(study.user_attrs["only"])
+    assert len(only)
+    assert all(x.startswith("model.") for x in only)
