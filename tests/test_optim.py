@@ -1,5 +1,6 @@
 import os
 
+import torch
 import pytest
 import optuna
 import param
@@ -101,3 +102,43 @@ def test_init_study(temp_dir, populate_torch_dir, raw):
     deserialize_from_dict(attrs_1["global_dict"], global_dict)
     study_2 = optuna.load_study("optimize", db_url)
     assert attrs_1 == study_2.user_attrs
+
+
+@pytest.mark.cpu
+def test_get_forward_backward_memory():
+    # this is an inherently difficult thing to check since deallocated memory is
+    # subtracted from the total. We'll get a lower bound from what should definitely
+    # be remaining by the backward call (excludes intermediate values)
+    F, V, T, N = 30, 20, 100, 50
+    param_dict = command_line.construct_default_param_dict()
+    param_dict["model"].window_size = param_dict["model"].window_stride = 1
+    # disable both convolutional and recurrent layers. The model should just be a
+    # linear layer and change
+    param_dict["model"].convolutional_layers = 0
+    param_dict["model"].recurrent_layers = 0
+    param_dict["training"].optimizer = torch.optim.SGD
+    param_dict["data"].batch_size = N
+    lower_bound = (
+        (
+            1  # lift tau
+            + F * (V + 1)  # linear layer W
+            + V  # linear layer b
+            + N * T * F  # input x
+            + N  # input len
+            + N * T * F  # unfold x
+            + N * T * F  # pack_padded
+            + N * T * F  # lift x
+            + T * N * (V + 1)  # output logits
+            + N * T * F  # pad_packed
+            + N  # output len
+            + 1  # logit sum
+        )
+        * 2  # forward + backward
+    ) * (
+        4 if torch.float == torch.float32 else 8
+    )  # float size
+    act = optim.get_forward_backward_memory(param_dict, F, V, T)
+    # FIXME(sdrobert): the lower bound is almost 3 times smaller than the actual amount
+    assert lower_bound < act
+    # reproducible
+    assert act == optim.get_forward_backward_memory(param_dict, F, V, T)

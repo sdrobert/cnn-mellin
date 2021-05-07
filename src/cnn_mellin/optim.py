@@ -1,6 +1,7 @@
 import os
 from typing import Optional, Union
 import warnings
+import gc
 
 import torch
 import optuna
@@ -215,18 +216,18 @@ def _chuck_set_from_only(only: set, set_: set, reason: str):
         only.remove(tunable)
 
 
-def get_train_memory(
+def get_forward_backward_memory(
     param_dict: dict, num_filts: int, num_classes: int, max_frames: int
 ) -> int:
 
-    model = models.AcousticModel(num_filts, num_classes + 1, param_dict["model"])
-    optim = param_dict["training"].optimizer(model.parameters(), lr=1e-4)
-    x = torch.empty(param_dict["data"].batch_size, max_frames, num_filts)
-    len_ = torch.full((param_dict["data"],), max_frames)
+    # do our best to stop deallocs from outside this scope being counted
+    gc.collect()
 
-    with torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True
-    ) as prof:
+    with torch.autograd.profiler.profile(profile_memory=True) as prof:
+        model = models.AcousticModel(num_filts, num_classes + 1, param_dict["model"])
+        optim = param_dict["training"].optimizer(model.parameters(), lr=1e-4)
+        x = torch.empty(param_dict["data"].batch_size, max_frames, num_filts)
+        len_ = torch.full((param_dict["data"].batch_size,), max_frames)
         optim.zero_grad()
         logits, out_len = model(
             x,
@@ -234,8 +235,10 @@ def get_train_memory(
             param_dict["training"].dropout_prob,
             param_dict["training"].convolutional_dropout_2d,
         )
-        logits.sum().backward()
-    del model, optim, out_len, logits, x, len_
+        z = logits.sum()
+        z.backward()
+        optim.step()
+    del model, optim, out_len, logits, x, len_, z
 
     return prof.total_average().cpu_memory_usage
 
