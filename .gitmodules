@@ -1,3 +1,3 @@
-[submodule "pytorch-database-prep"]
-	path = pytorch-database-prep
-	url = git@github.com:sdrobert/pytorch-database-prep.git
+[submodule "prep"]
+	path = prep
+	url = https://github.com/sdrobert/pytorch-database-prep.git
