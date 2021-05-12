@@ -1,5 +1,6 @@
 """Command line hooks for cnn_mellin"""
 
+from logging import warn
 import os
 import argparse
 import warnings
@@ -23,13 +24,13 @@ except ImportError:
     optim = None
 
 
-def readable_dir(str_):
+def readable_dir(str_) -> str:
     if not os.path.isdir(str_):
         raise argparse.ArgumentTypeError(f"'{str_}' is not a directory")
     return os.path.abspath(str_)
 
 
-def writable_dir(str_):
+def writable_dir(str_) -> str:
     if not os.path.isdir(str_):
         try:
             os.makedirs(str_)
@@ -61,6 +62,32 @@ def get_bounded_number_type(
         return val
 
     return _to_val
+
+
+def hhmmss_type(str_, allow_zero=False) -> str:
+    err = argparse.ArgumentTypeError(
+        f"Expected string of format '[[HH:]MM:]SS.xxx', got {str_}"
+    )
+    vals = str_.split(":")
+    if len(vals) > 3:
+        raise err
+    try:
+        vals = [float(x) for x in vals]
+    except TypeError:
+        raise err
+    val = vals.pop()
+    if val < 0.0 or vals and val >= 60.0:
+        raise err
+    factor = 60.0
+    while vals:
+        new = vals.pop()
+        if new < 0.0 or new % 1 or (vals and new >= 60.0):
+            raise err
+        val += new * factor
+        factor *= 60
+    if not allow_zero and val == 0.0:
+        raise argparse.ArgumentTypeError("Cannot be 0")
+    return val
 
 
 class RegexChoices(argparse.Action):
@@ -150,12 +177,12 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             help="Under what name to store the hyperparameter optimization results in the "
             "database. Defaults to the basename of the database url",
         )
-
         optim_subparsers = optim_parser.add_subparsers(
             required=True, dest="optim_command"
         )
+
         optim_init_subparser = optim_subparsers.add_parser(
-            "init", help="Initialize the database to begin optimization"
+            "init", help="Initialize the Optuna database to begin optimization"
         )
         optim_init_subparser.add_argument(
             "train_dir", type=readable_dir, help="Where training data are located"
@@ -193,6 +220,35 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             action=RegexChoices,
             default=all_,
             help="Regexes of hyperparameters to include in search",
+        )
+
+        optim_run_subparser = optim_subparsers.add_parser(
+            "run", help="Run a Study from a previously initialized optuna database"
+        )
+        optim_run_subparser.add_argument(
+            "--sampler",
+            default="motpe",
+            choices=["motpe", "random", "nsgaii"],
+            help="Which sampler to use in hyperparameter optimization. See "
+            "https://optuna.readthedocs.io/en/stable/reference/samplers.html for more "
+            "info",
+        )
+
+        end_group = optim_run_subparser.add_mutually_exclusive_group()
+        end_group.add_argument(
+            "--num-trials",
+            type=get_bounded_number_type(int, (0, float("inf"))),
+            default=None,
+            help="Number of trials to run before quitting. This is the total number "
+            "to run in *this* process - it ignores any previous or simultaneous trials",
+        )
+        end_group.add_argument(
+            "--timeout",
+            type=hhmmss_type,
+            default=None,
+            metavar="[[HH:]MM:]:SS.xxx",
+            help="Length of time to run the study before quitting. This is the total "
+            "length of *this* process - it ignores any previous or simultaneous trials",
         )
 
     return parser.parse_args(args)
@@ -240,6 +296,28 @@ def optim_init(options, param_dict):
     )
 
 
+def optim_run(options, param_dict):
+    study_name = options.study_name
+    if study_name is None:
+        study_name = os.path.basename(options.db_url.database).split(".")[0]
+    if options.sampler == "motpe":
+        sampler = optim.optuna.samplers.MOTPESampler()
+    elif options.sampler == "random":
+        sampler = optim.optuna.samplers.RandomSampler()
+    elif options.sampler == "nsgaii":
+        sampler = optim.optuna.samplers.NSGAIISampler()
+    else:
+        assert False
+    study = optim.optuna.load_study(study_name, str(options.db_url), sampler)
+    if study.user_attrs["device"] != str(options.device):
+        warnings.warn(
+            f"Device passed by command line ({options.device}) differs from the device "
+            f"the study was initialized with ({study.user_attrs['device']}). Will use "
+            "the latter."
+        )
+    study.optimize(optim.objective, options.num_trials, options.timeout)
+
+
 def cnn_mellin(args: Optional[Sequence[str]] = None):
     param_dict = construct_default_param_dict()
     options = parse_args(args, param_dict)
@@ -249,3 +327,5 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
     elif options.command == "optim":
         if options.optim_command == "init":
             optim_init(options, param_dict)
+        elif options.optim_command == "run":
+            optim_run(options, param_dict)

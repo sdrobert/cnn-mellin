@@ -95,3 +95,48 @@ def test_optim_init_command(temp_dir, populate_torch_dir):
     only = set(study.user_attrs["only"])
     assert len(only)
     assert all(x.startswith("model.") for x in only)
+
+
+@pytest.mark.parametrize("sampler", ["motpe", "random", "nsgaii"])
+def test_optim_run_command(device, temp_dir, populate_torch_dir, sampler):
+    C, F, V = 100, 5, 5
+    train_dir = os.path.join(temp_dir, "train")
+    populate_torch_dir(train_dir, C, num_filts=F, max_class=V - 1)
+    ext_dir = os.path.join(temp_dir, "ext")
+    os.makedirs(ext_dir)
+    ini_file = os.path.join(temp_dir, "cfg.ini")
+    with open(ini_file, "w") as file_:
+        file_.write("[model]\n")
+        file_.write("window_size=1\n")
+        file_.write("convolutional_layers=0\n")
+        file_.write("recurrent_layers=0\n")
+        file_.write("[training]\n")
+        file_.write("num_epochs=2\n")
+    assert not get_torch_spect_data_dir_info(
+        [train_dir, os.path.join(ext_dir, "train.info.ark")]
+    )
+    db_file = os.path.join(temp_dir, "optimize.db")
+    db_url = "sqlite:///" + db_file
+    common_args = [
+        "--device",
+        str(device),
+        "--read-ini",
+        ini_file,
+        "optim",
+        db_url,
+    ]
+    assert not command_line.cnn_mellin(
+        common_args
+        + [
+            "init",
+            train_dir,
+            "--whitelist",
+            r"training\.log10_learning_rate",
+        ]
+    )
+    assert not command_line.cnn_mellin(
+        common_args + ["run", "--sampler", sampler, "--num-trials", "2"]
+    )
+    study = optuna.load_study("optimize", db_url)
+    trials = study.get_trials(states=[optuna.trial.TrialState.COMPLETE])
+    assert len(trials) == 2
