@@ -11,7 +11,9 @@ def dilation_lift(f: torch.Tensor, tau: torch.Tensor, dim: int) -> torch.Tensor:
     if dim < 0:
         dim += len(old_shape)
     f = f.unsqueeze(-1).flatten(dim + 1)
-    exp_ = torch.arange(1, old_shape[dim] + 1, dtype=f.dtype) ** tau.to(f.dtype)
+    exp_ = torch.arange(
+        1, old_shape[dim] + 1, dtype=f.dtype, device=f.device
+    ) ** tau.to(f.dtype)
     return (f * exp_.unsqueeze(-1)).reshape(old_shape)
 
 

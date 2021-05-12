@@ -1,7 +1,10 @@
 import os
-from typing import Optional, Union
+from typing import List, Optional, Union
 import warnings
 import gc
+import time
+
+from copy import deepcopy
 
 import torch
 import optuna
@@ -12,6 +15,8 @@ import cnn_mellin.running as running
 import cnn_mellin.models as models
 import sqlalchemy.engine.url
 
+from cnn_mellin import construct_default_param_dict
+
 
 def init_study(
     train_dir: str,
@@ -19,6 +24,7 @@ def init_study(
     out_url: Union[str, sqlalchemy.engine.url.URL],
     only: set,
     study_name: Optional[str] = None,
+    device: Union[torch.device, str] = "cpu",
     dev_prop: float = 0.1,
     mem_limit: int = 6 * (1024 ** 3),
 ) -> optuna.Study:
@@ -195,6 +201,7 @@ def init_study(
     )
     if raw:
         study.set_user_attr("raw", True)
+    study.set_user_attr("device", str(device))
     study.set_user_attr("data_dir", train_dir)
     study.set_user_attr("train_ids", train_ids)
     study.set_user_attr("dev_ids", dev_ids)
@@ -241,6 +248,67 @@ def get_forward_backward_memory(
     del model, optim, out_len, logits, x, len_, z
 
     return prof.total_average().cpu_memory_usage
+
+
+def objective(trial: optuna.Trial) -> List[float]:
+    user_attrs = trial.study.user_attrs
+    device = torch.device(user_attrs["device"])
+    # try to make a tensor on the device. Raises a runtime error if it can't
+    torch.empty(1, device=device)
+    global_dict = construct_default_param_dict()
+    serialization.deserialize_from_dict(user_attrs["global_dict"], global_dict)
+    param_dict = poptuna.suggest_param_dict(trial, global_dict, set(user_attrs["only"]))
+    # deserialize a copy of the data params into a parameter set for the dev partition
+    dev_params = data.SpectDataSetParams(name="dev")
+    serialization.deserialize_from_dict(user_attrs["global_dict"]["data"], dev_params)
+    param_dict["data"].subset_ids = user_attrs["train_ids"]
+    dev_params = deepcopy(param_dict["data"])
+    dev_params.subset_ids = user_attrs["dev_ids"]
+
+    # def pruner_callback(epoch: int, train_loss: float, dev_err: float):
+    #     trial.report(dev_err, epoch)
+    #     if trial.should_prune():
+    #         raise optuna.exceptions.TrialPruned()
+
+    try:
+
+        results = [None, None]
+        if "memory" in user_attrs["optimized_values"]:
+            val = get_forward_backward_memory(
+                param_dict,
+                user_attrs["num_filts"],
+                user_attrs["num_classes"],
+                user_attrs["max_frames"],
+            )
+            if val > user_attrs["mem_limit"]:
+                raise optuna.exceptions.TrialPruned()
+            results.append(None)
+            results[user_attrs["optimized_values"].index("memory")] = float(val)
+
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+        start = time.time()
+        _, er = running.train_am(
+            param_dict["model"],
+            param_dict["training"],
+            param_dict["data"],
+            user_attrs["data_dir"],
+            user_attrs["data_dir"],
+            None,
+            device,
+            dev_data_params=dev_params,
+        )
+        wall_time = time.time() - start
+
+        results[user_attrs["optimized_values"].index("wall_time")] = wall_time
+        results[user_attrs["optimized_values"].index("er")] = er
+
+    except RuntimeError:  # probably an OOM
+        raise optuna.exceptions.TrialPruned()
+
+    return results
 
 
 # class ChainOrPruner(optuna.pruners.BasePruner):

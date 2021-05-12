@@ -58,7 +58,7 @@ def test_train_command(temp_dir, device, populate_torch_dir):
     for key in model_1_state_dict:
         v1, v2 = model_1_state_dict[key], model_2_state_dict[key]
         if isinstance(v1, torch.Tensor):
-            assert torch.allclose(v1, v2), key
+            assert torch.allclose(v1, v2, atol=1e-5), key
         else:
             assert v1 == v2, key
 

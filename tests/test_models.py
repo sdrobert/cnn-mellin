@@ -79,18 +79,18 @@ def test_dropout(device, is_2d):
     torch.manual_seed(1)
     logits_a, lens_a = model(x, lens, p, is_2d)
     logits_a = torch.nn.utils.rnn.pack_padded_sequence(
-        logits_a, lens_a, enforce_sorted=False
+        logits_a, lens_a.cpu(), enforce_sorted=False
     )
     logits_b, lens_b = model(x, lens, p, is_2d)
     logits_b = torch.nn.utils.rnn.pack_padded_sequence(
-        logits_b, lens_b, enforce_sorted=False
+        logits_b, lens_b.cpu(), enforce_sorted=False
     )
     assert (lens_a == lens_b).all()
     assert not torch.allclose(logits_a.data, logits_b.data, atol=1e-5)
     torch.manual_seed(1)
     logits_c, lens_c = model(x, lens, p, is_2d)
     logits_c = torch.nn.utils.rnn.pack_padded_sequence(
-        logits_c, lens_c, enforce_sorted=False
+        logits_c, lens_c.cpu(), enforce_sorted=False
     )
     assert (lens_a == lens_c).all()
     assert torch.allclose(logits_a.data, logits_c.data)

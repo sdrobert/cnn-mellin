@@ -11,12 +11,13 @@ import numpy as np
 
 from pydrobert.torch.command_line import get_torch_spect_data_dir_info
 from pydrobert.param.serialization import deserialize_from_dict
+from cnn_mellin import construct_default_param_dict
 
 
 @pytest.mark.cpu
 @pytest.mark.parametrize("raw", [True, False])
 def test_can_optimize_parameter_dict(raw):
-    exp_dict = command_line.construct_default_param_dict()
+    exp_dict = construct_default_param_dict()
     all_ = poptuna.get_param_dict_tunable(exp_dict)
     only = {
         "model.window_size",
@@ -75,7 +76,7 @@ def test_init_study(temp_dir, populate_torch_dir, raw):
     assert not get_torch_spect_data_dir_info(
         [train_dir, os.path.join(ext_dir, "train.info.ark")]
     )
-    global_dict = command_line.construct_default_param_dict()
+    global_dict = construct_default_param_dict()
     global_dict["data"].batch_size = 300
     global_dict["training"].num_epochs = 1
     only = {
@@ -110,7 +111,7 @@ def test_get_forward_backward_memory():
     # subtracted from the total. We'll get a lower bound from what should definitely
     # be remaining by the backward call (excludes intermediate values)
     F, V, T, N = 30, 20, 100, 50
-    param_dict = command_line.construct_default_param_dict()
+    param_dict = construct_default_param_dict()
     param_dict["model"].window_size = param_dict["model"].window_stride = 1
     # disable both convolutional and recurrent layers. The model should just be a
     # linear layer and change
@@ -142,3 +143,28 @@ def test_get_forward_backward_memory():
     assert lower_bound < act
     # reproducible
     assert act == optim.get_forward_backward_memory(param_dict, F, V, T)
+
+
+def test_objective(device, temp_dir, populate_torch_dir):
+    C, T, F, V = 100, 200, 10, 5
+    train_dir = os.path.join(temp_dir, "train")
+    _, refs, feat_sizes, utt_ids = populate_torch_dir(
+        train_dir, C, num_filts=F, max_class=V - 1
+    )
+    exp_num_classes = max(x.max().item() for x in refs) + 1
+    exp_max_frames = max(feat_sizes)
+    ext_dir = os.path.join(temp_dir, "ext")
+    os.makedirs(ext_dir)
+    db_path = os.path.join(temp_dir, "optimize.db")
+    db_url = f"sqlite:///{db_path}"
+    assert not get_torch_spect_data_dir_info(
+        [train_dir, os.path.join(ext_dir, "train.info.ark")]
+    )
+    global_dict = construct_default_param_dict()
+    global_dict["data"].batch_size = C // 5
+    global_dict["training"].num_epochs = 2
+    global_dict["model"].convolutional_layers = 0
+    global_dict["model"].recurrent_layers = 0
+    only = {"model.window_size"}
+    study = optim.init_study(train_dir, global_dict, db_url, only, None, device, 0.5)
+    study.optimize(optim.objective, 5)

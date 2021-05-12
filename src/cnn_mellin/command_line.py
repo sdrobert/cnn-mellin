@@ -6,7 +6,6 @@ import warnings
 import sys
 import re
 
-from collections import OrderedDict
 from typing import Any, Optional, Sequence, Text, Union
 
 import torch
@@ -16,20 +15,12 @@ import pydrobert.torch.data as data
 import pydrobert.param.argparse as pargparse
 import pydrobert.param.optuna as poptuna
 
+from cnn_mellin import construct_default_param_dict
+
 try:
     import cnn_mellin.optim as optim
 except ImportError:
     optim = None
-
-
-def construct_default_param_dict():
-    return OrderedDict(
-        (
-            ("model", models.AcousticModelParams(name="model")),
-            ("training", running.MyTrainingStateParams(name="training")),
-            ("data", data.SpectDataSetParams(name="data")),
-        )
-    )
 
 
 def readable_dir(str_):
@@ -243,6 +234,7 @@ def optim_init(options, param_dict):
         options.db_url,
         options.whitelist - options.blacklist,
         options.study_name,
+        options.device,
         options.dev_proportion,
         options.mem_limit_bytes,
     )

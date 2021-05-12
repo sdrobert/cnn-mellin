@@ -29,7 +29,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
         doc="Which method of gradient descent to perform",
     )
     dropout_prob = param.Magnitude(
-        0.0,
+        0.05,
         softbounds=(0.0, 0.5),
         inclusive_bounds=(True, False),
         doc="The model dropout probability for all layers",
@@ -87,6 +87,12 @@ class MyTrainingStateParams(training.TrainingStateParams):
         softbounds=(0, 5),
         doc="SpecAugment maximum number of frequency masks to apply",
     )
+    max_shift_proportion = param.Magnitude(
+        0.05,
+        softbounds=(0.0, 0.5),
+        doc="Randomly shift audio by up to this proportion of the sequence length on "
+        "either side of the sequence (total possible proportion is twice this value)",
+    )
 
     @classmethod
     def get_tunable(cls):
@@ -95,6 +101,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
             "dropout_prob",
             "max_freq_mask",
             "max_freq_warp",
+            "max_shift_proportion",
             "max_time_mask_proportion",
             "max_time_mask",
             "max_time_warp",
@@ -170,6 +177,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
         check_and_set("max_freq_warp")
         check_and_set("num_time_mask", True)
         check_and_set("num_freq_mask")
+        check_and_set("max_shift_proportion")
         if params.num_time_mask:
             check_and_set("num_time_mask_proportion")
             check_and_set("max_time_mask", True)
@@ -232,6 +240,8 @@ def train_am_for_epoch(
         .to(device)
     )
 
+    random_shift = layers.RandomShift(params.max_shift_proportion)
+
     if not quiet:
         loader = tqdm(loader)
 
@@ -248,6 +258,7 @@ def train_am_for_epoch(
         if refs.dim() == 3:
             refs = refs[..., 0]
         feats = spec_augment(feats, feat_lens)
+        feats, lens = random_shift(feats, feat_lens)
         logits, lens = model(
             feats, feat_lens, params.dropout_prob, params.convolutional_dropout_2d
         )
@@ -316,7 +327,8 @@ def ctc_greedy_search(
 
 
 def greedy_decode_am(
-    model: models.AcousticModel, loader: data.SpectEvaluationDataLoader,
+    model: models.AcousticModel,
+    loader: data.SpectEvaluationDataLoader,
 ) -> float:
     """Determine average error rate on eval set using greedy decoding
 
@@ -399,7 +411,7 @@ def get_filts_and_classes(train_dir: str) -> Tuple[int, int]:
 def train_am(
     model_params: models.AcousticModelParams,
     training_params: MyTrainingStateParams,
-    data_params: data.SpectDataSetParams,
+    train_data_params: data.SpectDataSetParams,
     train_dir: str,
     dev_dir: str,
     model_dir: Optional[str] = None,
@@ -407,6 +419,7 @@ def train_am(
     num_data_workers: int = os.cpu_count() - 1,
     epoch_callbacks: Sequence[Callable[[int, float, float], Any]] = tuple(),
     quiet: bool = True,
+    dev_data_params: Optional[data.SpectDataSetParams] = None,
 ) -> Tuple[models.AcousticModel, float]:
 
     if (
@@ -439,14 +452,17 @@ def train_am(
 
     train_loader = data.SpectTrainingDataLoader(
         train_dir,
-        data_params,
+        train_data_params,
         batch_first=True,
         seed=training_params.seed,
         pin_memory=device.type == "cuda",
         num_workers=num_data_workers,
     )
     dev_loader = data.SpectEvaluationDataLoader(
-        dev_dir, data_params, batch_first=True, num_workers=num_data_workers
+        dev_dir,
+        train_data_params if dev_data_params is None else dev_data_params,
+        batch_first=True,
+        num_workers=num_data_workers,
     )
 
     dev_err = float("inf")
