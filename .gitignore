@@ -109,6 +109,8 @@ venv.bak/
 .ftpignore
 data/
 exp/
+data
+exp
 conf/slurm.conf
 .gitversion
 .vscode

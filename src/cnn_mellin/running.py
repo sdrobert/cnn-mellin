@@ -70,7 +70,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
         "time to mask per mask",
     )
     num_time_mask = param.Integer(
-        20,
+        2,
         bounds=(0, None),
         softbounds=(0, 40),
         doc="SpecAgument absolute upper bound on the number of temporal masks to apply",

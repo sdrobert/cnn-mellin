@@ -198,7 +198,7 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "--mem-limit-bytes",
             metavar="N",
             type=get_bounded_number_type(int, (1, float("inf"))),
-            default=6 * (1024 ** 3),
+            default=10 * (1024 ** 3),
             help="If optimizing model parameters, the number of bytes to limit the "
             "forward-backward pass of the largest batch to on CPU. Models above this "
             "number will be pruned.",
@@ -227,8 +227,8 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         )
         optim_run_subparser.add_argument(
             "--sampler",
-            default="motpe",
-            choices=["motpe", "random", "nsgaii"],
+            default="tpe",
+            choices=["tpe", "random", "cmaes", "nsgaii"],
             help="Which sampler to use in hyperparameter optimization. See "
             "https://optuna.readthedocs.io/en/stable/reference/samplers.html for more "
             "info",
@@ -300,10 +300,12 @@ def optim_run(options, param_dict):
     study_name = options.study_name
     if study_name is None:
         study_name = os.path.basename(options.db_url.database).split(".")[0]
-    if options.sampler == "motpe":
-        sampler = optim.optuna.samplers.MOTPESampler()
+    if options.sampler == "tpe":
+        sampler = optim.optuna.samplers.TPESampler()
     elif options.sampler == "random":
         sampler = optim.optuna.samplers.RandomSampler()
+    elif options.sampler == "cmaes":
+        sampler = optim.optuna.samplers.CmaEsSampler()
     elif options.sampler == "nsgaii":
         sampler = optim.optuna.samplers.NSGAIISampler()
     else:

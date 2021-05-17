@@ -97,7 +97,7 @@ def test_optim_init_command(temp_dir, populate_torch_dir):
     assert all(x.startswith("model.") for x in only)
 
 
-@pytest.mark.parametrize("sampler", ["motpe", "random", "nsgaii"])
+@pytest.mark.parametrize("sampler", ["tpe", "random", "cmaes", "nsgaii"])
 def test_optim_run_command(device, temp_dir, populate_torch_dir, sampler):
     C, F, V = 100, 5, 5
     train_dir = os.path.join(temp_dir, "train")

@@ -51,7 +51,7 @@ def test_can_optimize_parameter_dict(raw):
         param_dict = poptuna.suggest_param_dict(trial, exp_dict, only)
         return get_loss(param_dict)
 
-    study.optimize(objective, n_trials=1000)
+    study.optimize(objective, n_trials=3000 if raw else 1000)
     best_trial = optuna.trial.FixedTrial(study.best_params)
     if raw:
         best_trial.set_user_attr("raw", True)
@@ -105,8 +105,7 @@ def test_init_study(temp_dir, populate_torch_dir, raw):
     assert attrs_1 == study_2.user_attrs
 
 
-@pytest.mark.cpu
-def test_get_forward_backward_memory():
+def test_get_forward_backward_memory(device):
     # this is an inherently difficult thing to check since deallocated memory is
     # subtracted from the total. We'll get a lower bound from what should definitely
     # be remaining by the backward call (excludes intermediate values)
@@ -119,30 +118,9 @@ def test_get_forward_backward_memory():
     param_dict["model"].recurrent_layers = 0
     param_dict["training"].optimizer = torch.optim.SGD
     param_dict["data"].batch_size = N
-    lower_bound = (
-        (
-            1  # lift tau
-            + F * (V + 1)  # linear layer W
-            + V  # linear layer b
-            + N * T * F  # input x
-            + N  # input len
-            + N * T * F  # unfold x
-            + N * T * F  # pack_padded
-            + N * T * F  # lift x
-            + T * N * (V + 1)  # output logits
-            + N * T * F  # pad_packed
-            + N  # output len
-            + 1  # logit sum
-        )
-        * 2  # forward + backward
-    ) * (
-        4 if torch.float == torch.float32 else 8
-    )  # float size
-    act = optim.get_forward_backward_memory(param_dict, F, V, T)
-    # FIXME(sdrobert): the lower bound is almost 3 times smaller than the actual amount
-    assert lower_bound < act
-    # reproducible
-    assert act == optim.get_forward_backward_memory(param_dict, F, V, T)
+    # FIXME(sdrobert): some lower bound would be nice
+    res = optim.get_forward_backward_memory(param_dict, F, V, T, device)
+    assert res == optim.get_forward_backward_memory(param_dict, F, V, T, device)
 
 
 def test_objective(device, temp_dir, populate_torch_dir):
@@ -151,8 +129,6 @@ def test_objective(device, temp_dir, populate_torch_dir):
     _, refs, feat_sizes, utt_ids = populate_torch_dir(
         train_dir, C, num_filts=F, max_class=V - 1
     )
-    exp_num_classes = max(x.max().item() for x in refs) + 1
-    exp_max_frames = max(feat_sizes)
     ext_dir = os.path.join(temp_dir, "ext")
     os.makedirs(ext_dir)
     db_path = os.path.join(temp_dir, "optimize.db")
@@ -168,3 +144,4 @@ def test_objective(device, temp_dir, populate_torch_dir):
     only = {"model.window_size"}
     study = optim.init_study(train_dir, global_dict, db_url, only, None, device, 0.5)
     study.optimize(optim.objective, 5)
+    assert len(study.get_trials(states=optuna.trial.TrialState.COMPLETE)) == 5

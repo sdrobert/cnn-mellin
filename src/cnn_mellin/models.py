@@ -46,13 +46,13 @@ class AcousticModelParams(param.Parameterized):
     convolutional_initial_channels = param.Integer(
         64,
         bounds=(1, None),
-        softbounds=(1, 256),
+        softbounds=(1, 512),
         doc="The number of channels in the initial convolutional layer",
     )
     convolutional_layers = param.Integer(
         5,
         bounds=(0, None),
-        softbounds=(0, 20),
+        softbounds=(0, 10),
         doc="The number of layers in the convolutional part of the network",
     )
     convolutional_mellin = param.Boolean(
@@ -69,7 +69,7 @@ class AcousticModelParams(param.Parameterized):
     convolutional_freq_factor = param.Integer(
         1,
         bounds=(1, None),
-        softbounds=(1, 5),
+        softbounds=(1, 10),
         doc="The factor by which to reduce the size of the input along the "
         "frequency dimension after convolutional_factor_schedule layers",
     )
@@ -90,21 +90,21 @@ class AcousticModelParams(param.Parameterized):
         torch.nn.functional.relu,
         objects={
             "relu": torch.nn.functional.relu,
-            "sigmoid": torch.nn.functional.sigmoid,
-            "tanh": torch.nn.functional.tanh,
+            "sigmoid": torch.sigmoid,
+            "tanh": torch.tanh,
         },
         doc="The pointwise convolutional_nonlinearity between convolutional layers",
     )
     recurrent_size = param.Integer(
         128,
         bounds=(1, None),
-        softbounds=(64, 512),
+        softbounds=(64, 1024),
         doc="The size of each recurrent layer",
     )
     recurrent_layers = param.Integer(
         2,
         bounds=(0, None),
-        softbounds=(0, 20),
+        softbounds=(0, 5),
         doc="The number of recurrent layers in the recurrent part of the network",
     )
     recurrent_type = param.ObjectSelector(
@@ -257,6 +257,7 @@ class AcousticModel(torch.nn.Module):
 
         self.convs = torch.nn.ModuleList([])
 
+        x = params.window_size
         kx = params.convolutional_kernel_time
         ky = params.convolutional_kernel_freq
         ci = 1
@@ -309,15 +310,28 @@ class AcousticModel(torch.nn.Module):
                         r=(0, py // sy),
                     )
                 )
+                x = ((px + 1) * x - 1) // (kx + dx - 1) + 1
                 y = (y + py - ky) // sy + py // sy + 1
             else:
                 self.convs.append(
                     torch.nn.Conv2d(ci, co, (kx, ky), padding=(px, py), stride=(sx, sy))
                 )
                 y = (y + 2 * py - ky) // sy + 1
+                x = (x + 2 * px - kx) // sx + 1
             ci = co
-        # flatten the channel dimension (ci) into the frequency dimension (y)
-        prev_size = ci * y
+        if x <= 0:
+            raise RuntimeError(
+                f"Parameter configuration yields frequency dimension of {x} after "
+                "convolution. Try decreasing the time decimation factor"
+            )
+        if y <= 0:
+            raise RuntimeError(
+                f"Parameter configuration yields frequency dimension of {y} after "
+                "convolution. Try decreasing the frequency decimation factor or using "
+                "an odd kernel width"
+            )
+        # flatten the window, channel, and frequency dimension
+        prev_size = ci * y * x
         if params.recurrent_layers:
             self.rnn = params.recurrent_type(
                 input_size=prev_size,
@@ -387,7 +401,7 @@ class AcousticModel(torch.nn.Module):
                 x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)
             else:
                 x = torch.nn.functional.dropout(x, dropout_prob, self.training)
-        x = x.sum(2).view(x.size(0), -1)  # (N', co * F')
+        x = x.view(x.size(0), -1)  # (N', co * w' * F')
         if self.rnn is not None:
             x = self.rnn(
                 torch.nn.utils.rnn.PackedSequence(
