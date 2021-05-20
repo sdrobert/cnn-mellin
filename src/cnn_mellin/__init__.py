@@ -4,7 +4,22 @@ __license__ = "Apache 2.0"
 __copyright__ = "Copyright 2021 Sean Robertson"
 
 
-__all__ = ["layers", "models", "running", "construct_default_param_dict"]
+__all__ = [
+    "layers",
+    "models",
+    "running",
+    "construct_default_param_dict",
+    "get_num_avail_cores",
+]
+
+
+def get_num_avail_cores() -> int:
+    import os
+
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    else:
+        return os.cpu_count()
 
 
 def construct_default_param_dict():

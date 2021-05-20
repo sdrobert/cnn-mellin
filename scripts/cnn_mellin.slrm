@@ -1,0 +1,33 @@
+#! /usr/bin/env bash
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=20G
+#SBATCH --export=ALL
+#SBATCH --output=exp/logs/slurm-%J.out
+#SBATCH --error=exp/logs/slurm-%J.err
+#SBATCH --open-mode=append
+#SBATCH --gres=gpu:1
+#SBATCH --time=infinite
+
+echo "$0 called with arguments: $*"
+
+# first determine if we've got cnn-mellin installed
+if ! which cnn-mellin > /dev/null ; then
+  echo -e "$0: cnn-mellin unavailable. Did you run 'pip install -e .'?"
+  exit 1
+fi
+
+# set device flag if we have it
+args=( "$@" )
+if ! [[ "${args[*]}" =~ --device ]]; then
+  device_flag="--device=$( python -c 'import torch; print("cuda" if torch.cuda.is_available() else "cpu")')"
+  echo "Could not find --device flag. Adding '$device_flag'"
+  args=( "$device_flag" "${args[@]}" )
+fi
+
+# this loop is primarily for optim when an estimate caused an OOM exception.
+for x in $(seq 1 100); do
+  cnn-mellin "${args[@]}" && break
+  echo -e "Call ended with error (attempt $x/100)"
+done

@@ -144,4 +144,4 @@ def test_objective(device, temp_dir, populate_torch_dir):
     only = {"model.window_size"}
     study = optim.init_study(train_dir, global_dict, db_url, only, None, device, 0.5)
     study.optimize(optim.objective, 5)
-    assert len(study.get_trials(states=optuna.trial.TrialState.COMPLETE)) == 5
+    assert len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE])) == 5

@@ -16,7 +16,7 @@ import pydrobert.torch.data as data
 import pydrobert.param.argparse as pargparse
 import pydrobert.param.optuna as poptuna
 
-from cnn_mellin import construct_default_param_dict
+from cnn_mellin import construct_default_param_dict, get_num_avail_cores
 
 try:
     import cnn_mellin.optim as optim
@@ -156,7 +156,7 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
     train_parser.add_argument(
         "--num-data-workers",
         type=int,
-        default=os.cpu_count() - 1,
+        default=get_num_avail_cores() - 1,
         help="Number of background workers for training data loader. 0 is serial. "
         "Defaults to one fewer than the number of virtual cores on the machine.",
     )
@@ -202,6 +202,13 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             help="If optimizing model parameters, the number of bytes to limit the "
             "forward-backward pass of the largest batch to on CPU. Models above this "
             "number will be pruned.",
+        )
+        optim_init_subparser.add_argument(
+            "--num-data-workers",
+            type=int,
+            default=get_num_avail_cores() - 1,
+            help="Number of background workers for training data loader. 0 is serial. "
+            "Defaults to one fewer than the number of virtual cores on the machine.",
         )
 
         blacklist_whitelist_group = optim_init_subparser.add_mutually_exclusive_group()

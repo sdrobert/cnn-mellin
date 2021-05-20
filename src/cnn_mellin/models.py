@@ -8,9 +8,9 @@ from typing import Tuple
 import param
 import torch
 
-from pydrobert.mellin.torch import MellinLinearCorrelation
+from pydrobert.mellin.torch import MellinCorrelation, MellinLinearCorrelation
 
-from cnn_mellin.layers import DilationLift
+from cnn_mellin.layers import DilationLift, LogCompression
 
 __all__ = [
     "AcousticModelParams",
@@ -19,6 +19,16 @@ __all__ = [
 
 
 class AcousticModelParams(param.Parameterized):
+    use_log_compression = param.Boolean(
+        True,
+        doc="Whether to add a pointwise log(1 + eps) layer to the input with "
+        "learnable eps",
+    )
+    use_lift = param.Boolean(
+        True,
+        doc="Whether to add the learnable lift operation to the network. Applied "
+        "after log compression (if enabled)",
+    )
     window_size = param.Integer(
         10,
         bounds=(1, None),
@@ -138,6 +148,8 @@ class AcousticModelParams(param.Parameterized):
             "recurrent_layers",
             "recurrent_size",
             "recurrent_type",
+            "use_lift",
+            "use_log_compression",
             "window_size",
             "window_stride",
         }
@@ -197,6 +209,8 @@ class AcousticModelParams(param.Parameterized):
 
         check_and_set("window_size", True)
         check_and_set("window_stride", True)
+        check_and_set("use_log_compression")
+        check_and_set("use_lift")
         check_and_set("convolutional_layers", False)
         check_and_set("recurrent_layers", False)
         if params.convolutional_layers:
@@ -250,22 +264,33 @@ class AcousticModel(torch.nn.Module):
 
     def __init__(self, freq_dim: int, target_dim: int, params: AcousticModelParams):
         super(AcousticModel, self).__init__()
-        self.lift = DilationLift(2)
         self.params = params
         self.freq_dim = freq_dim
         self.target_dim = target_dim
 
+        if params.use_log_compression:
+            self.log_compression = LogCompression()
+        else:
+            self.register_parameter("log_compression", None)
+
+        if params.use_lift:
+            self.lift = DilationLift(2)
+        else:
+            self.register_parameter("lift", None)
+
         self.convs = torch.nn.ModuleList([])
+
+        self.raw = freq_dim == 1
 
         x = params.window_size
         kx = params.convolutional_kernel_time
-        ky = params.convolutional_kernel_freq
+        ky = 1 if self.raw else params.convolutional_kernel_freq
         ci = 1
         y = freq_dim
         co = params.convolutional_initial_channels
         up_c = params.convolutional_channel_factor
         decim_x = params.convolutional_time_factor
-        on_sy = params.convolutional_freq_factor
+        on_sy = 1 if self.raw else params.convolutional_freq_factor
         py = (ky - 1) // 2
         off_s = dy = off_dx = 1
         if params.convolutional_mellin:
@@ -299,24 +324,30 @@ class AcousticModel(torch.nn.Module):
             else:  # "on:" adjusting output size
                 dx, sx, sy, co = on_dx, on_sx, on_sy, up_c * co
             if params.convolutional_mellin:
-                self.convs.append(
-                    MellinLinearCorrelation(
-                        ci,
-                        co,
-                        (kx, ky),
-                        s=(sx, sy),
-                        d=(dx, dy),
-                        p=(px, py),
-                        r=(0, py // sy),
+                if self.raw:
+                    self.convs.append(MellinCorrelation(ci, co, kx, sx, dx, px))
+                else:
+                    self.convs.append(
+                        MellinLinearCorrelation(
+                            ci,
+                            co,
+                            (kx, ky),
+                            s=(sx, sy),
+                            d=(dx, dy),
+                            p=(px, py),
+                            r=(0, py // sy),
+                        )
                     )
-                )
+                    y = (y + py - ky) // sy + py // sy + 1
                 x = ((px + 1) * x - 1) // (kx + dx - 1) + 1
-                y = (y + py - ky) // sy + py // sy + 1
             else:
-                self.convs.append(
-                    torch.nn.Conv2d(ci, co, (kx, ky), padding=(px, py), stride=(sx, sy))
-                )
-                y = (y + 2 * py - ky) // sy + 1
+                if self.raw:
+                    self.convs.append(torch.nn.Conv1d(ci, co, kx, sx, px))
+                else:
+                    self.convs.append(
+                        torch.nn.Conv2d(ci, co, (kx, ky), (sx, sy), (px, py))
+                    )
+                    y = (y + 2 * py - ky) // sy + 1
                 x = (x + 2 * px - kx) // sx + 1
             ci = co
         if x <= 0:
@@ -330,8 +361,8 @@ class AcousticModel(torch.nn.Module):
                 "convolution. Try decreasing the frequency decimation factor or using "
                 "an odd kernel width"
             )
-        # flatten the window, channel, and frequency dimension
-        prev_size = ci * y * x
+        # sum the window and flatten the channel and frequency dimension
+        prev_size = ci * y
         if params.recurrent_layers:
             self.rnn = params.recurrent_type(
                 input_size=prev_size,
@@ -388,27 +419,47 @@ class AcousticModel(torch.nn.Module):
             2, 3
         )  # (N, T', w, F)
         lens_ = (lens - 1) // self.params.window_stride + 1
+
+        # fuse the N and T' dimension together for now. No sense in performing
+        # convolutions on windows of entirely padding
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lens_.cpu(), batch_first=True, enforce_sorted=False
         )
-        # fuse the N and T' dimension together for now. No sense in performing
-        # convolutions on windows of entirely padding
         x, bs, si, ui = x.data, x.batch_sizes, x.sorted_indices, x.unsorted_indices
-        x = self.lift(x).unsqueeze(1)  # (N', 1, w, F)
+
+        # perform optional log compression, lift
+        if self.log_compression is not None:
+            x = self.log_compression(x)
+        if self.lift is not None:
+            x = self.lift(x)
+
+        x = x.unsqueeze(1)  # (N', 1, w, F)
+        if self.raw:
+            x = x.flatten(2)  # (N', 1, w)
+
+        # convolutions
         for conv in self.convs:
-            x = self.params.convolutional_nonlinearity(conv(x))  # (N', co, w',F')
+            x = self.params.convolutional_nonlinearity(conv(x))  # (N', co, w'[ ,F'])
             if dropout_is_2d:
                 x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)
             else:
                 x = torch.nn.functional.dropout(x, dropout_prob, self.training)
-        x = x.view(x.size(0), -1)  # (N', co * w' * F')
+
+        # sum out the window dimension and reshape for rnn input
+        x = x.sum(2).view(x.size(0), -1)  # (N', co * F')
+
+        # rnns
         if self.rnn is not None:
             x = self.rnn(
                 torch.nn.utils.rnn.PackedSequence(
                     x, batch_sizes=bs, sorted_indices=si, unsorted_indices=ui
                 )
             )[0].data
+
+        # feed-forward
         x = self.out(x)  # (N', target_dim)
+
+        # unpack and return
         x = torch.nn.utils.rnn.PackedSequence(
             x, batch_sizes=bs, sorted_indices=si, unsorted_indices=ui
         )
@@ -418,9 +469,7 @@ class AcousticModel(torch.nn.Module):
         if self.params.seed is not None:
             torch.manual_seed(self.params.seed)
         for layer in chain(
-            (self.lift, self.out, self.rnn)
-            if self.rnn is not None
-            else (self.lift, self.out),
-            self.convs,
+            (self.lift, self.log_compression, self.out, self.rnn), self.convs
         ):
-            layer.reset_parameters()
+            if layer is not None:
+                layer.reset_parameters()

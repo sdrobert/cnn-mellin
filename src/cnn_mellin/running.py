@@ -15,6 +15,8 @@ import pydrobert.torch.layers as layers
 import pydrobert.torch.data as data
 import cnn_mellin.models as models
 
+from cnn_mellin import get_num_avail_cores
+from cnn_mellin.layers import ScaledGaussianNoise
 from tqdm import tqdm
 
 
@@ -27,6 +29,9 @@ class MyTrainingStateParams(training.TrainingStateParams):
             "rms": torch.optim.RMSprop,
         },
         doc="Which method of gradient descent to perform",
+    )
+    noise_eps = param.Magnitude(
+        1e-3, doc="The proportion of gaussian noise per coefficient to add to the input"
     )
     dropout_prob = param.Magnitude(
         0.05,
@@ -105,6 +110,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
             "max_time_mask_proportion",
             "max_time_mask",
             "max_time_warp",
+            "noise_eps",
             "num_freq_mask",
             "num_time_mask_proportion",
             "num_time_mask",
@@ -172,6 +178,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
             setattr(params, name, val)
 
         check_and_set("optimizer")
+        check_and_set("noise_prop", False, True)
         check_and_set("dropout_prob")
         check_and_set("max_time_warp", True)
         check_and_set("max_freq_warp")
@@ -215,7 +222,7 @@ def train_am_for_epoch(
     if not loader.batch_first:
         raise ValueError("data loader batch_first must be true")
 
-    device = model.lift.log_tau.device
+    device = next(model.parameters()).device
     non_blocking = device.type == "cpu" or loader.pin_memory
 
     if epoch == 1 or (controller.state_dir and controller.state_csv_path):
@@ -224,6 +231,8 @@ def train_am_for_epoch(
     model.train()
 
     loss_fn = torch.nn.CTCLoss(blank=model.target_dim - 1, zero_infinity=True)
+
+    noise = ScaledGaussianNoise(1, params.noise_eps)
 
     spec_augment = (
         layers.SpecAugment(
@@ -257,8 +266,7 @@ def train_am_for_epoch(
         optimizer.zero_grad()
         if refs.dim() == 3:
             refs = refs[..., 0]
-        feats = spec_augment(feats, feat_lens)
-        feats, lens = random_shift(feats, feat_lens)
+        feats, lens = random_shift(spec_augment(noise(feats), feat_lens), feat_lens)
         logits, lens = model(
             feats, feat_lens, params.dropout_prob, params.convolutional_dropout_2d
         )
@@ -327,8 +335,7 @@ def ctc_greedy_search(
 
 
 def greedy_decode_am(
-    model: models.AcousticModel,
-    loader: data.SpectEvaluationDataLoader,
+    model: models.AcousticModel, loader: data.SpectEvaluationDataLoader,
 ) -> float:
     """Determine average error rate on eval set using greedy decoding
 
@@ -339,7 +346,7 @@ def greedy_decode_am(
     if not loader.batch_first:
         raise ValueError("data loader batch_first must be true")
 
-    device = model.lift.log_tau.device
+    device = next(model.parameters()).device
     non_blocking = device.type == "cpu" or loader.pin_memory
 
     model.eval()
@@ -416,7 +423,7 @@ def train_am(
     dev_dir: str,
     model_dir: Optional[str] = None,
     device: Union[torch.device, str] = "cpu",
-    num_data_workers: int = os.cpu_count() - 1,
+    num_data_workers: int = get_num_avail_cores() - 1,
     epoch_callbacks: Sequence[Callable[[int, float, float], Any]] = tuple(),
     quiet: bool = True,
     dev_data_params: Optional[data.SpectDataSetParams] = None,

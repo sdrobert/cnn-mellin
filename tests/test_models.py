@@ -24,11 +24,11 @@ def test_model_parameters_are_same_after_seeded_reset():
 @pytest.mark.parametrize("window_size", [40, 1])
 @pytest.mark.parametrize("window_stride", [1, 2])
 @pytest.mark.parametrize("time_factor", [1, 2])
-@pytest.mark.parametrize("freq_factor", [1, 2])
 @pytest.mark.parametrize("factor_sched", [1, 2])
 @pytest.mark.parametrize("convolutional_layers", [0, 5])
 @pytest.mark.parametrize("recurrent_layers", [0, 2])
-@pytest.mark.parametrize("bidirectional", [True, False])
+@pytest.mark.parametrize("bidirectional", [True, False], ids=("bi", "uni"))
+@pytest.mark.parametrize("freq_factor,raw", [(1, True), (1, False), (2, False)])
 def test_can_run(
     mellin,
     rnn,
@@ -40,9 +40,10 @@ def test_can_run(
     convolutional_layers,
     recurrent_layers,
     bidirectional,
+    raw,
     device,
 ):
-    T, N, F, Y = 30, 50, 40, 10
+    T, N, F, Y = 30, 50, 1 if raw else 40, 10
     params = models.AcousticModelParams(
         seed=5,
         convolutional_mellin=mellin,
@@ -102,10 +103,11 @@ def test_dropout(device, is_2d):
     "convolutional_layers", [0, 1, 3], ids=("layers0", "layers1", "layers3")
 )
 @pytest.mark.parametrize("mellin", [True, False], ids=("mellin", "linear"))
+@pytest.mark.parametrize("raw", [True, False], ids=("raw", "filt"))
 def test_padding_yields_same_gradients(
-    window_size, window_stride, convolutional_layers, mellin, device
+    window_size, window_stride, convolutional_layers, mellin, raw, device
 ):
-    T, N, F, Y = 95, 100, 3, 2
+    T, N, F, Y = 95, 100, 1 if raw else 3, 2
     params = models.AcousticModelParams(
         seed=5,
         window_size=window_size,

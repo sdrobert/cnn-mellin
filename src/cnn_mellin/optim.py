@@ -15,7 +15,7 @@ import cnn_mellin.running as running
 import cnn_mellin.models as models
 import sqlalchemy.engine.url
 
-from cnn_mellin import construct_default_param_dict
+from cnn_mellin import construct_default_param_dict, get_num_avail_cores
 
 
 def init_study(
@@ -27,6 +27,7 @@ def init_study(
     device: Union[torch.device, str] = "cpu",
     dev_prop: float = 0.1,
     mem_limit: int = 10 * (1024 ** 3),
+    num_data_workers: int = get_num_avail_cores() - 1,
 ) -> optuna.Study:
     only = set(only)  # non-destructive
 
@@ -206,6 +207,7 @@ def init_study(
     study.set_user_attr("num_filts", num_filts)
     study.set_user_attr("mem_limit", mem_limit)
     study.set_user_attr("only", sorted(only))
+    study.set_user_attr("num_data_workers", num_data_workers)
     return study
 
 
@@ -314,12 +316,20 @@ def objective(trial: optuna.Trial) -> List[float]:
             user_attrs["data_dir"],
             None,
             device,
-            epoch_callbacks=[pruner_callback],
+            user_attrs["num_data_workers"],
+            [pruner_callback],
             dev_data_params=dev_params,
         )
 
     except (OSError, RuntimeError) as e:  # probably an OOM
-        raise_ = e.args
+        if any(
+            isinstance(x, str)
+            and (x.find("out of") > -1 or x.find("Parameter configuration yields") > -1)
+            for x in e.args
+        ):
+            raise_ = e.args
+        else:
+            raise
     finally:
         gc.collect()
 
