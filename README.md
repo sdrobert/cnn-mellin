@@ -30,7 +30,7 @@ python prep/timit.py data/timit init_phn --lm
 # - raw:             Raw audio
 # All representations assume 16kHz samples.
 feature_names=( fbank-81-10ms sigbank-41-2ms )
-for feature_name in "${filter_feature_names[@]}"; do
+for feature_name in "${feature_names[@]}"; do
   python prep/timit.py data/timit torch_dir phn48 $feature_name \
     --computer-json conf/feats/$feature_name.json
 done
@@ -55,7 +55,8 @@ for model_type in "${model_types[@]}"; do
         sqlite:///exp/optim.db \
         init \
           data/timit/${feature_name}/train \
-          --blacklist 'training.*' 'data.*' 'model.convolutional_mellin'
+          --blacklist 'training.*' 'data.*' 'model.convolutional_mellin' \
+          --num-data-workers 4
   done
 done
 

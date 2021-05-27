@@ -240,6 +240,13 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "https://optuna.readthedocs.io/en/stable/reference/samplers.html for more "
             "info",
         )
+        optim_run_subparser.add_argument(
+            "--prune-warmup-epochs",
+            type=int,
+            default=5,
+            help="Number of epochs training to perform before we consider pruning a "
+            "trial",
+        )
 
         end_group = optim_run_subparser.add_mutually_exclusive_group()
         end_group.add_argument(
@@ -317,7 +324,10 @@ def optim_run(options, param_dict):
         sampler = optim.optuna.samplers.NSGAIISampler()
     else:
         assert False
-    study = optim.optuna.load_study(study_name, str(options.db_url), sampler)
+    pruner = optim.optuna.pruners.MedianPruner(
+        n_warmup_steps=options.prune_warmup_epochs
+    )
+    study = optim.optuna.load_study(study_name, str(options.db_url), sampler, pruner)
     if study.user_attrs["device"] != str(options.device):
         warnings.warn(
             f"Device passed by command line ({options.device}) differs from the device "

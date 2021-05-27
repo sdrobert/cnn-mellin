@@ -288,7 +288,8 @@ def objective(trial: optuna.Trial) -> List[float]:
     dev_params.subset_ids = user_attrs["dev_ids"]
 
     def pruner_callback(epoch: int, train_loss: float, dev_err: float):
-        trial.report(dev_err, epoch)
+        # epochs are 1-indexed; steps are 0-indexed
+        trial.report(dev_err, epoch - 1)
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned(f"Pruned epoch {epoch}@{dev_err:.2%}")
 
@@ -324,7 +325,7 @@ def objective(trial: optuna.Trial) -> List[float]:
     except (OSError, RuntimeError) as e:  # probably an OOM
         if any(
             isinstance(x, str)
-            and (x.find("out of") > -1 or x.find("Parameter configuration yields") > -1)
+            and (x.find("memory") > -1 or x.find("Parameter configuration yields") > -1)
             for x in e.args
         ):
             raise_ = e.args
