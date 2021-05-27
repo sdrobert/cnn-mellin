@@ -97,13 +97,18 @@ def test_dropout(device, is_2d):
     assert torch.allclose(logits_a.data, logits_c.data)
 
 
-@pytest.mark.parametrize("window_size", [1, 10, 100], ids=("win1", "win10", "win100"))
-@pytest.mark.parametrize("window_stride", [2, 13], ids=("stride2", "stride13"))
-@pytest.mark.parametrize(
-    "convolutional_layers", [0, 1, 3], ids=("layers0", "layers1", "layers3")
-)
-@pytest.mark.parametrize("mellin", [True, False], ids=("mellin", "linear"))
-@pytest.mark.parametrize("raw", [True, False], ids=("raw", "filt"))
+@pytest.mark.parametrize("window_size", [100], ids=("win100",))
+# @pytest.mark.parametrize("window_size", [1, 10, 100], ids=("win1", "win10", "win100"))
+@pytest.mark.parametrize("window_stride", [2], ids=("stride2",))
+# @pytest.mark.parametrize("window_stride", [2, 13], ids=("stride2", "stride13"))
+@pytest.mark.parametrize("convolutional_layers", [3], ids=("layers3",))
+# @pytest.mark.parametrize(
+#     "convolutional_layers", [0, 1, 3], ids=("layers0", "layers1", "layers3")
+# )
+@pytest.mark.parametrize("mellin", [True], ids=("mellin",))
+# @pytest.mark.parametrize("mellin", [True, False], ids=("mellin", "linear"))
+@pytest.mark.parametrize("raw", [False], ids=("filt",))
+# @pytest.mark.parametrize("raw", [True, False], ids=("raw", "filt"))
 def test_padding_yields_same_gradients(
     window_size, window_stride, convolutional_layers, mellin, raw, device
 ):
