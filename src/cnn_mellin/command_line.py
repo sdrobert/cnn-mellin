@@ -15,6 +15,7 @@ import cnn_mellin.running as running
 import pydrobert.torch.data as data
 import pydrobert.param.argparse as pargparse
 import pydrobert.param.optuna as poptuna
+import pydrobert.param.serialization as serialization
 
 from cnn_mellin import construct_default_param_dict, get_num_avail_cores
 
@@ -265,6 +266,27 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "length of *this* process - it ignores any previous or simultaneous trials",
         )
 
+        optim_best_subparser = optim_subparsers.add_parser(
+            "best",
+            help="Write best (lowest ER) parameters of hyperparameter search to file "
+            "or stdout",
+        )
+        optim_best_subparser.add_argument(
+            "out_file",
+            nargs="?",
+            type=argparse.FileType("w"),
+            default=sys.stdout,
+            help="File to write to. Defaults to '-' (stdout)",
+        )
+
+        optim_best_subparser.add_argument(
+            "--force-type",
+            default=None,
+            choices=["ini", "json", "yaml"],
+            help="Write the file as this type. Default is to infer the file type based "
+            "on file extension or, if it can't be, 'ini'",
+        )
+
     return parser.parse_args(args)
 
 
@@ -310,7 +332,7 @@ def optim_init(options, param_dict):
     )
 
 
-def optim_run(options, param_dict):
+def optim_run(options):
     study_name = options.study_name
     if study_name is None:
         study_name = os.path.basename(options.db_url.database).split(".")[0]
@@ -337,6 +359,30 @@ def optim_run(options, param_dict):
     study.optimize(optim.objective, options.num_trials, options.timeout)
 
 
+def optim_best(options):
+    study_name = options.study_name
+    if study_name is None:
+        study_name = os.path.basename(options.db_url.database).split(".")[0]
+    study = optim.optuna.load_study(study_name, str(options.db_url))
+    best_params = optim.get_best(study)
+
+    if options.force_type is None:
+        ext = os.path.splitext(options.out_file.name)
+        if ext == ".json":
+            options.force_type = "json"
+        elif ext == ".yaml":
+            options.force_type = "yaml"
+        else:
+            options.force_type = "ini"
+
+    if options.force_type == "ini":
+        serialization.serialize_to_ini(options.out_file, best_params)
+    elif options.force_type == "json":
+        serialization.serialize_to_json(options.out_file, best_params)
+    else:
+        serialization.serialize_to_yaml(options.out_file, best_params)
+
+
 def cnn_mellin(args: Optional[Sequence[str]] = None):
     param_dict = construct_default_param_dict()
     options = parse_args(args, param_dict)
@@ -347,4 +393,6 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
         if options.optim_command == "init":
             optim_init(options, param_dict)
         elif options.optim_command == "run":
-            optim_run(options, param_dict)
+            optim_run(options)
+        elif options.optim_command == "best":
+            optim_best(options)

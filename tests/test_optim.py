@@ -16,51 +16,6 @@ from cnn_mellin import construct_default_param_dict
 
 @pytest.mark.cpu
 @pytest.mark.parametrize("raw", [True, False])
-def test_can_optimize_parameter_dict(raw):
-    exp_dict = construct_default_param_dict()
-    all_ = poptuna.get_param_dict_tunable(exp_dict)
-    only = {
-        "model.window_size",
-        "training.optimizer",
-        "data.batch_size",
-        "model.convolutional_kernel_freq",
-    }
-    assert not (only - all_)
-    del all_
-    sampler = optuna.samplers.TPESampler(n_startup_trials=200, seed=0)
-    study = optuna.create_study(sampler=sampler)
-    if raw:
-        study.set_user_attr("raw", True)
-        exp_dict["model"].convolutional_kernel_freq = 1
-        exp_dict["model"].window_size *= 100
-
-    def get_loss(act_dict) -> float:
-        loss = 0.0
-        for tuned in only:
-            dict_name, param_name = tuned.split(".")
-            v1 = getattr(exp_dict[dict_name], param_name)
-            v2 = getattr(act_dict[dict_name], param_name)
-            entry = exp_dict[dict_name].param.params()[param_name]
-            if isinstance(entry, param.Number):
-                loss += (v1 - v2) ** 2 / max(v1, 1)
-            elif v1 != v2:
-                loss += 10
-        return loss
-
-    def objective(trial):
-        param_dict = poptuna.suggest_param_dict(trial, exp_dict, only)
-        return get_loss(param_dict)
-
-    study.optimize(objective, n_trials=3000 if raw else 1000)
-    best_trial = optuna.trial.FixedTrial(study.best_params)
-    if raw:
-        best_trial.set_user_attr("raw", True)
-    best_params = poptuna.suggest_param_dict(best_trial, exp_dict, only)
-    assert np.isclose(get_loss(best_params), 0.0)
-
-
-@pytest.mark.cpu
-@pytest.mark.parametrize("raw", [True, False])
 def test_init_study(temp_dir, populate_torch_dir, raw):
     C, F, V = 300, (1 if raw else 100), 10
     train_dir = os.path.join(temp_dir, "train")
@@ -145,3 +100,35 @@ def test_objective(device, temp_dir, populate_torch_dir):
     study = optim.init_study(train_dir, global_dict, db_url, only, None, device, 0.5)
     study.optimize(optim.objective, 5)
     assert len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE])) == 5
+
+
+def test_get_best(temp_dir, populate_torch_dir):
+    C, T, F, V = 5, 10, 10, 5
+    train_dir = os.path.join(temp_dir, "train")
+    _, refs, feat_sizes, utt_ids = populate_torch_dir(
+        train_dir, C, num_filts=F, max_class=V - 1
+    )
+    ext_dir = os.path.join(temp_dir, "ext")
+    os.makedirs(ext_dir)
+    db_path = os.path.join(temp_dir, "optimize.db")
+    db_url = f"sqlite:///{db_path}"
+    assert not get_torch_spect_data_dir_info(
+        [train_dir, os.path.join(ext_dir, "train.info.ark")]
+    )
+    global_dict = construct_default_param_dict()
+    global_dict["data"].batch_size = C // 5
+    global_dict["training"].num_epochs = 2
+    global_dict["model"].convolutional_layers = 0
+    global_dict["model"].recurrent_layers = 0
+    only = {"model.window_size"}
+    study = optim.init_study(train_dir, global_dict, db_url, only, None, "cpu", 0.5)
+
+    def objective(trial: optuna.Trial) -> float:
+        param_dict = poptuna.suggest_param_dict(trial, global_dict, only)
+        return (param_dict["model"].window_size - 5) ** 2
+
+    study.optimize(objective, 1000)
+
+    param_dict = optim.get_best(study)
+
+    assert param_dict["model"].window_size == 5

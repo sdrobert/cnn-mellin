@@ -272,7 +272,7 @@ def get_forward_backward_memory(
         return peak
 
 
-def objective(trial: optuna.Trial) -> List[float]:
+def objective(trial: optuna.Trial) -> float:
     user_attrs = trial.study.user_attrs
     device = torch.device(user_attrs["device"])
     # try to make a tensor on the device. Raises a runtime error if it can't
@@ -338,3 +338,11 @@ def objective(trial: optuna.Trial) -> List[float]:
         raise optuna.exceptions.TrialPruned(*raise_)
 
     return er
+
+
+def get_best(study: optuna.Study) -> dict:
+    user_attrs = study.user_attrs
+    global_dict = construct_default_param_dict()
+    serialization.deserialize_from_dict(user_attrs["global_dict"], global_dict)
+    trial = study.best_trial
+    return poptuna.suggest_param_dict(trial, global_dict, set(user_attrs["only"]))
