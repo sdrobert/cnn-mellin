@@ -178,7 +178,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
             setattr(params, name, val)
 
         check_and_set("optimizer")
-        check_and_set("noise_prop", False, True)
+        check_and_set("noise_eps")
         check_and_set("dropout_prob")
         check_and_set("max_time_warp", True)
         check_and_set("max_freq_warp")
@@ -335,7 +335,8 @@ def ctc_greedy_search(
 
 
 def greedy_decode_am(
-    model: models.AcousticModel, loader: data.SpectEvaluationDataLoader,
+    model: models.AcousticModel,
+    loader: data.SpectEvaluationDataLoader,
 ) -> float:
     """Determine average error rate on eval set using greedy decoding
 

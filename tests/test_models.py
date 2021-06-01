@@ -71,9 +71,10 @@ def test_can_run(
     y.sum().backward()
 
 
-@pytest.mark.parametrize("is_2d", [True, False])
-def test_dropout(device, is_2d):
-    T, N, F, Y, p = 15, 40, 20, 11, 0.5
+@pytest.mark.parametrize("is_2d", [True, False], ids=("2d", "1d"))
+@pytest.mark.parametrize("raw", [True, False], ids=("raw", "filt"))
+def test_dropout(device, raw, is_2d):
+    T, N, F, Y, p = 15, 40, 1 if raw else 20, 11, 0.5
     model = models.AcousticModel(F, Y, models.AcousticModelParams()).to(device)
     x = torch.rand((N, T, F), device=device)
     lens = torch.randint(1, T + 1, size=(N,), device=device)
@@ -97,22 +98,23 @@ def test_dropout(device, is_2d):
     assert torch.allclose(logits_a.data, logits_c.data)
 
 
-@pytest.mark.parametrize("window_size", [100], ids=("win100",))
-# @pytest.mark.parametrize("window_size", [1, 10, 100], ids=("win1", "win10", "win100"))
-@pytest.mark.parametrize("window_stride", [2], ids=("stride2",))
-# @pytest.mark.parametrize("window_stride", [2, 13], ids=("stride2", "stride13"))
-@pytest.mark.parametrize("convolutional_layers", [3], ids=("layers3",))
-# @pytest.mark.parametrize(
-#     "convolutional_layers", [0, 1, 3], ids=("layers0", "layers1", "layers3")
-# )
-@pytest.mark.parametrize("mellin", [True], ids=("mellin",))
-# @pytest.mark.parametrize("mellin", [True, False], ids=("mellin", "linear"))
-@pytest.mark.parametrize("raw", [False], ids=("filt",))
-# @pytest.mark.parametrize("raw", [True, False], ids=("raw", "filt"))
+# @pytest.mark.parametrize("window_size", [100], ids=("win100",))
+@pytest.mark.parametrize("window_size", [1, 10, 100], ids=("win1", "win10", "win100"))
+# @pytest.mark.parametrize("window_stride", [2], ids=("stride2",))
+@pytest.mark.parametrize("window_stride", [2, 13], ids=("stride2", "stride13"))
+# @pytest.mark.parametrize("convolutional_layers", [3], ids=("layers3",))
+@pytest.mark.parametrize(
+    "convolutional_layers", [0, 1, 3], ids=("layers0", "layers1", "layers3")
+)
+# @pytest.mark.parametrize("mellin", [True], ids=("mellin",))
+@pytest.mark.parametrize("mellin", [True, False], ids=("mellin", "linear"))
+# @pytest.mark.parametrize("raw", [False], ids=("filt",))
+@pytest.mark.parametrize("raw", [True, False], ids=("raw", "filt"))
 def test_padding_yields_same_gradients(
     window_size, window_stride, convolutional_layers, mellin, raw, device
 ):
-    T, N, F, Y = 95, 100, 1 if raw else 3, 2
+    N, F, Y = 128, 1 if raw else 16, 2
+    T = 1024 // F
     params = models.AcousticModelParams(
         seed=5,
         window_size=window_size,
@@ -120,9 +122,9 @@ def test_padding_yields_same_gradients(
         convolutional_layers=convolutional_layers,
         convolutional_mellin=mellin,
     )
-    model = models.AcousticModel(F, Y, params).to(device)
+    model = models.AcousticModel(F, Y, params).to(device).to(torch.double)
     parameters = list(model.parameters())
-    x = torch.rand((N, T, F), device=device, requires_grad=True)
+    x = torch.rand((N, T, F), device=device, requires_grad=True, dtype=torch.double)
     lens = torch.randint(1, T + 1, size=(N,), device=device)
     total_loss_1 = 0.0
     for n in range(N):

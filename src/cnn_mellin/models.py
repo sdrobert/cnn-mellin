@@ -441,7 +441,12 @@ class AcousticModel(torch.nn.Module):
         for conv in self.convs:
             x = self.params.convolutional_nonlinearity(conv(x))  # (N', co, w'[ ,F'])
             if dropout_is_2d:
-                x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)
+                if self.raw:
+                    x = torch.nn.functional.dropout2d(
+                        x.unsqueeze(-1), dropout_prob, self.training
+                    ).squeeze(-1)
+                else:
+                    x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)
             else:
                 x = torch.nn.functional.dropout(x, dropout_prob, self.training)
 
