@@ -198,7 +198,7 @@ def mconvlconv_buffers(request):
     )
 
 
-@pytest.fixture(params=[1, 8], ids=("N=1", "N=8"))
+@pytest.fixture(params=[1, 4], ids=("N=1", "N=4"))
 def N(request):
     return request.param
 
@@ -223,12 +223,12 @@ def r(request):
     return request.param
 
 
-@pytest.fixture(params=[1, 16], ids=("C_in=1", "C_in=16"))
+@pytest.fixture(params=[1, 8], ids=("C_in=1", "C_in=8"))
 def C_in(request):
     return request.param
 
 
-@pytest.fixture(params=[1, 32], ids=("C_out=1", "C_out=32"))
+@pytest.fixture(params=[1, 16], ids=("C_out=1", "C_out=16"))
 def C_out(request):
     return request.param
 

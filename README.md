@@ -52,11 +52,13 @@ Continues from above at Step 2
 # them in parallel and b) some stopping criterion.
 # 
 # STEP 2.1: create optuna experiments for model selection
+# N.B. all data augmentation (including dropout) is disabled during the search
+# to 
 mkdir -p exp/logs
 for model_type in "${model_types[@]}"; do
   for feature_name in "${feature_names[@]}"; do
     cnn-mellin \
-      --read-ini conf/optim/model-${model_type}-${feature_name}.ini \
+      --read-ini conf/optim/model-${model_type}.ini \
       --device cuda \
       optim \
         --study-name model-${model_type}-${feature_name} \
@@ -71,24 +73,13 @@ done
 # STEP 2.2: run a random hyperparameter search for a while
 for model_type in "${model_types[@]}"; do
   for feature_name in "${feature_names[@]}"; do
-    sbatch -p t4v1 --qos normal --time 24:00:00 scripts/cnn_mellin.slrm  \
-      optim \
-        --study-name model-${model_type}-${feature_name} \
-        sqlite:///exp/optim.db \
-        run \
-          --sampler random
-  done
-done
-
-# STEP 2.3: run TPE search for a while
-for model_type in "${model_types[@]}"; do
-  for feature_name in "${feature_names[@]}"; do
-    sbatch -p t4v1 --qos normal --time 10:00:00 scripts/cnn_mellin.slrm  \
+    sbatch -p t4v1 --qos normal --time 48:00:00 scripts/cnn_mellin.slrm  \
       optim \
         --study-name model-${model_type}-${feature_name} \
         sqlite:///exp/optim.db \
         run \
           --sampler tpe
+          --timeout 48:00:00
   done
 done
 
@@ -105,7 +96,7 @@ for model_type in "${model_types[@]}"; do
 done
 
 # STEP 2.5: create optuna experiments for training optimization
-# We stick to numerical parameters so that we can use cmaes right away
+# We don't optimize the learning rate b/c it's adaptive w/ adam
 for model_type in "${model_types[@]}"; do
   for feature_name in "${feature_names[@]}"; do
     cnn-mellin \
@@ -118,19 +109,15 @@ for model_type in "${model_types[@]}"; do
           data/timit/${feature_name}/train \
           --num-data-workers 4 \
           --whitelist \
-            'data.batch_size' \
             'training.dropout_prob' \
-            'training.log10_learning_rate' \
+            'training.convolutional_dropout_2d' \
             'training.max_.+' \
             'training.noise_eps' \
-            'training.num_(time|freq)_.*' \
-            'training.reduce_lr_.*'
+            'training.num_(time|freq)_.*'
   done
 done
 
-# STEP 2.6: do CMAES for a while
-# we set the number of epochs very high before pruning as we don't want to
-# punish slower training as much
+# STEP 2.6: tpe
 for model_type in "${model_types[@]}"; do
   for feature_name in "${feature_names[@]}"; do
     sbatch -p t4v1 --qos normal --time 24:00:00 scripts/cnn_mellin.slrm  \
@@ -138,8 +125,7 @@ for model_type in "${model_types[@]}"; do
         --study-name train-${model_type}-${feature_name} \
         sqlite:///exp/optim.db \
         run \
-          --sampler cmaes \
-          --prune-warmup-epochs 50
+          --sampler tpe
   done
 done
 ```

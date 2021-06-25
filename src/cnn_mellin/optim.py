@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Union
+from typing import Optional, Union
 import warnings
 import gc
 import tracemalloc
@@ -325,7 +325,10 @@ def objective(trial: optuna.Trial) -> float:
     except (OSError, RuntimeError) as e:  # probably an OOM
         if any(
             isinstance(x, str)
-            and (x.find("memory") > -1 or x.find("Parameter configuration yields") > -1)
+            and (
+                x.find("out of memory") > -1
+                or x.find("Parameter configuration yields") > -1
+            )
             for x in e.args
         ):
             raise_ = e.args

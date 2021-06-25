@@ -31,27 +31,27 @@ class MyTrainingStateParams(training.TrainingStateParams):
         doc="Which method of gradient descent to perform",
     )
     noise_eps = param.Magnitude(
-        1e-3, doc="The proportion of gaussian noise per coefficient to add to the input"
+        1e-3,
+        softbounds=(1e-5, 1e-1),
+        doc="The proportion of gaussian noise per coefficient to add to the input",
     )
     dropout_prob = param.Magnitude(
         0.05,
-        softbounds=(0.0, 0.5),
-        inclusive_bounds=(True, False),
         doc="The model dropout probability for all layers",
     )
     convolutional_dropout_2d = param.Boolean(
         True, doc="If true, zero out channels instead of individual coefficients"
     )
     max_time_warp = param.Number(
-        80.0,
+        20.0,
         bounds=(0.0, None),
-        softbounds=(0.0, 100.0),
+        softbounds=(0.0, 20.0),
         doc="SpecAugment max time dimension warp during training",
     )
     max_freq_warp = param.Number(
         0.0,
         bounds=(0.0, None),
-        softbounds=(0.0, 40.0),
+        softbounds=(0.0, 25.0),
         doc="SpecAugment max frequency dimension warp during training",
     )
     max_time_mask = param.Integer(
@@ -94,7 +94,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
     )
     max_shift_proportion = param.Magnitude(
         0.05,
-        softbounds=(0.0, 0.5),
+        softbounds=(0.0, 0.2),
         doc="Randomly shift audio by up to this proportion of the sequence length on "
         "either side of the sequence (total possible proportion is twice this value)",
     )
@@ -178,7 +178,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
             setattr(params, name, val)
 
         check_and_set("optimizer")
-        check_and_set("noise_eps")
+        check_and_set("noise_eps", False, True)
         check_and_set("dropout_prob")
         check_and_set("max_time_warp", True)
         check_and_set("max_freq_warp")

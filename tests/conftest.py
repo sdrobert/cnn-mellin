@@ -7,7 +7,6 @@ from shutil import rmtree
 
 import torch
 
-
 @pytest.fixture
 def temp_dir():
     dir_name = mkdtemp()

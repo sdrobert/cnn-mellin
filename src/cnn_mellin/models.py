@@ -1,5 +1,6 @@
 """Acoustic models"""
 
+from pydrobert.mellin import lcorr_valid_size, mcorr_valid_size
 import warnings
 
 from itertools import chain
@@ -8,7 +9,7 @@ from typing import Tuple
 import param
 import torch
 
-from pydrobert.mellin.torch import MellinCorrelation, MellinLinearCorrelation
+from pydrobert.mellin.torch import MCorr1d, MCorrLCorr
 
 from cnn_mellin.layers import DilationLift, LogCompression
 
@@ -44,19 +45,19 @@ class AcousticModelParams(param.Parameterized):
     convolutional_kernel_time = param.Integer(
         3,
         bounds=(1, None),
-        softbounds=(1, 10),
+        softbounds=(1, 20),
         doc="The width of convolutional kernels along the time dimension",
     )
     convolutional_kernel_freq = param.Integer(
         3,
         bounds=(1, None),
-        softbounds=(1, 10),
+        softbounds=(1, 20),
         doc="The width of convolutional kernels along the frequency dimension",
     )
     convolutional_initial_channels = param.Integer(
         64,
         bounds=(1, None),
-        softbounds=(1, 512),
+        softbounds=(1, 128),
         doc="The number of channels in the initial convolutional layer",
     )
     convolutional_layers = param.Integer(
@@ -79,7 +80,7 @@ class AcousticModelParams(param.Parameterized):
     convolutional_freq_factor = param.Integer(
         1,
         bounds=(1, None),
-        softbounds=(1, 10),
+        softbounds=(1, 5),
         doc="The factor by which to reduce the size of the input along the "
         "frequency dimension after convolutional_factor_schedule layers",
     )
@@ -211,13 +212,13 @@ class AcousticModelParams(param.Parameterized):
         check_and_set("window_stride", True)
         check_and_set("use_log_compression")
         check_and_set("use_lift")
-        check_and_set("convolutional_layers", False)
-        check_and_set("recurrent_layers", False)
+        check_and_set("convolutional_layers")
+        check_and_set("recurrent_layers")
         if params.convolutional_layers:
             check_and_set("convolutional_mellin")
-            check_and_set("convolutional_kernel_time", True)
-            check_and_set("convolutional_kernel_freq", True)
-            check_and_set("convolutional_initial_channels", False, True)
+            check_and_set("convolutional_kernel_time")
+            check_and_set("convolutional_kernel_freq")
+            check_and_set("convolutional_initial_channels")
             check_and_set(
                 "convolutional_factor_schedule", high=params.convolutional_layers + 1
             )
@@ -257,9 +258,6 @@ class AcousticModel(torch.nn.Module):
     target_dim : int
         The number of types in the output vocabulary (including blanks)
     params : AcousticModelParams
-
-    Attributes
-    ----------
     """
 
     def __init__(self, freq_dim: int, target_dim: int, params: AcousticModelParams):
@@ -271,12 +269,12 @@ class AcousticModel(torch.nn.Module):
         if params.use_log_compression:
             self.log_compression = LogCompression()
         else:
-            self.register_parameter("log_compression", None)
+            self.add_module("log_compression", None)
 
         if params.use_lift:
             self.lift = DilationLift(2)
         else:
-            self.register_parameter("lift", None)
+            self.add_module("lift", None)
 
         self.convs = torch.nn.ModuleList([])
 
@@ -291,76 +289,59 @@ class AcousticModel(torch.nn.Module):
         up_c = params.convolutional_channel_factor
         decim_x = params.convolutional_time_factor
         on_sy = 1 if self.raw else params.convolutional_freq_factor
-        py = (ky - 1) // 2
+        px, py = (kx - 1) // 2, (ky - 1) // 2
         off_s = dy = off_dx = 1
         if params.convolutional_mellin:
-            # the equation governing the size of the output on a mellin dimension is
-            # x' = ceil((p + 1)(x' + u - 1)/(k + d - 1)) - (s - 1) + r
-            # to reproduce the same size output, set p = k - 1, d = 1, s = 1, r = 0,
-            # u = 1.
-            # There are a few ways to decimate the input to an appropriate width, but
-            # earlier experimentation preferred higher values of p to do so. Setting
-            # p = k - 1, d = (decim_x - 1) * k + 1, u = 1, s = 1, and r = 0,
-            # x' = ceil((k * x) / (kx + (decim_x - 1) * k + 1 - 1))
-            #    = ceil((k * x) / (decim_x * k)) = ceil(x / decim_x)
             on_sx = 1
-            px = kx - 1
             on_dx = (decim_x - 1) * kx + 1
         else:
-            # the equation governing the size of the output on a linear dimension is
-            # x' = (x + 2p - d * (k - 1) - 1) // s + 1
-            # If k % 2 = 1, (k - 1) // 2 * 2 == k - 1. If k % 2 == 0,
-            # (k - 1) // 2 * 2 == k - 2, which will shrink our input by 1 on the
-            # off-factors and by 0 or 1 on the on-factors, depending on whether
-            # the decimation factor is > 1.
             on_sx = decim_x
-            px = (kx - 1) // 2
             on_dx = 1
         for layer_no in range(1, params.convolutional_layers + 1):
             if (
                 layer_no % params.convolutional_factor_schedule
             ):  # "off:" not adjusting output size
-                dx, sx, sy = off_dx, off_s, off_s
+                dx, sx, sy, Dx, Dy = off_dx, off_s, off_s, 1, 1
             else:  # "on:" adjusting output size
-                dx, sx, sy, co = on_dx, on_sx, on_sy, up_c * co
+                dx, sx, sy, co, Dx, Dy = on_dx, on_sx, on_sy, up_c * co, decim_x, on_sy
             if params.convolutional_mellin:
+                new_x = mcorr_valid_size(kx, x, sx, dx, px)
+                exp_x = max(x // Dx, 1)
+                assert exp_x >= new_x
+                rx = exp_x - new_x
                 if self.raw:
-                    self.convs.append(MellinCorrelation(ci, co, kx, sx, dx, px))
+                    self.convs.append(MCorr1d(ci, co, kx, sx, dx, px, rx))
                 else:
+                    new_y = lcorr_valid_size(ky, y, sy, dy, py)
+                    exp_y = max(y // Dy, 1)
+                    assert exp_y >= new_y
+                    ry = exp_y - new_y
                     self.convs.append(
-                        MellinLinearCorrelation(
+                        MCorrLCorr(
                             ci,
                             co,
                             (kx, ky),
                             s=(sx, sy),
                             d=(dx, dy),
                             p=(px, py),
-                            r=(0, py // sy),
+                            r=(rx, ry),
                         )
                     )
-                    y = (y + py - ky) // sy + py // sy + 1
-                x = ((px + 1) * x - 1) // (kx + dx - 1) + 1
+                    y = new_y + ry
+                x = new_x + rx
             else:
+                px_ = px if (x + 2 * px - kx) // sx + 1 >= 0 else px + 1
                 if self.raw:
-                    self.convs.append(torch.nn.Conv1d(ci, co, kx, sx, px))
+                    self.convs.append(torch.nn.Conv1d(ci, co, kx, sx, px_))
                 else:
+                    py_ = py if (y + 2 * py - ky) // sy + 1 >= 0 else py + 1
                     self.convs.append(
-                        torch.nn.Conv2d(ci, co, (kx, ky), (sx, sy), (px, py))
+                        torch.nn.Conv2d(ci, co, (kx, ky), (sx, sy), (px_, py_))
                     )
-                    y = (y + 2 * py - ky) // sy + 1
-                x = (x + 2 * px - kx) // sx + 1
+                    y = (y + 2 * py_ - ky) // sy + 1
+                x = (x + 2 * px_ - kx) // sx + 1
             ci = co
-        if x <= 0:
-            raise RuntimeError(
-                f"Parameter configuration yields frequency dimension of {x} after "
-                "convolution. Try decreasing the time decimation factor"
-            )
-        if y <= 0:
-            raise RuntimeError(
-                f"Parameter configuration yields frequency dimension of {y} after "
-                "convolution. Try decreasing the frequency decimation factor or using "
-                "an odd kernel width"
-            )
+        assert x > 0 and y > 0
         # sum the window and flatten the channel and frequency dimension
         prev_size = ci * y
         if params.recurrent_layers:
@@ -433,13 +414,13 @@ class AcousticModel(torch.nn.Module):
         if self.lift is not None:
             x = self.lift(x)
 
-        x = x.unsqueeze(1)  # (N', 1, w, F)
         if self.raw:
-            x = x.flatten(2)  # (N', 1, w)
+            x = x.flatten(1)  # (N', w)
+        x = x.unsqueeze(1)  # (N', 1, w[, F])
 
         # convolutions
         for conv in self.convs:
-            x = self.params.convolutional_nonlinearity(conv(x))  # (N', co, w'[ ,F'])
+            x = self.params.convolutional_nonlinearity(conv(x))
             if dropout_is_2d:
                 if self.raw:
                     x = torch.nn.functional.dropout2d(

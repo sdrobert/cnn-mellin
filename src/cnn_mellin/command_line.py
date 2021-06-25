@@ -241,13 +241,6 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "https://optuna.readthedocs.io/en/stable/reference/samplers.html for more "
             "info",
         )
-        optim_run_subparser.add_argument(
-            "--prune-warmup-epochs",
-            type=int,
-            default=5,
-            help="Number of epochs training to perform before we consider pruning a "
-            "trial",
-        )
 
         end_group = optim_run_subparser.add_mutually_exclusive_group()
         end_group.add_argument(
@@ -337,18 +330,18 @@ def optim_run(options):
     if study_name is None:
         study_name = os.path.basename(options.db_url.database).split(".")[0]
     if options.sampler == "tpe":
-        sampler = optim.optuna.samplers.TPESampler()
+        sampler = optim.optuna.samplers.TPESampler(
+            multivariate=True, group=True, constant_liar=True
+        )
     elif options.sampler == "random":
         sampler = optim.optuna.samplers.RandomSampler()
     elif options.sampler == "cmaes":
-        sampler = optim.optuna.samplers.CmaEsSampler()
+        sampler = optim.optuna.samplers.CmaEsSampler(consider_pruned_trials=True)
     elif options.sampler == "nsgaii":
         sampler = optim.optuna.samplers.NSGAIISampler()
     else:
         assert False
-    pruner = optim.optuna.pruners.MedianPruner(
-        n_warmup_steps=options.prune_warmup_epochs
-    )
+    pruner = optim.optuna.pruners.HyperbandPruner()
     study = optim.optuna.load_study(study_name, str(options.db_url), sampler, pruner)
     if study.user_attrs["device"] != str(options.device):
         warnings.warn(
