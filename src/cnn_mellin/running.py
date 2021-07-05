@@ -30,6 +30,9 @@ class MyTrainingStateParams(training.TrainingStateParams):
         },
         doc="Which method of gradient descent to perform",
     )
+    autocast = param.Boolean(
+        False, doc="Whether to perform mixed-precision training. Only valid for CUDA"
+    )
     noise_eps = param.Magnitude(
         1e-3,
         softbounds=(1e-5, 1e-1),
@@ -224,6 +227,7 @@ def train_am_for_epoch(
 
     device = next(model.parameters()).device
     non_blocking = device.type == "cpu" or loader.pin_memory
+    autocast = params.autocast and device.type == "cuda"
 
     if epoch == 1 or (controller.state_dir and controller.state_csv_path):
         controller.load_model_and_optimizer_for_epoch(model, optimizer, epoch - 1, True)
@@ -259,23 +263,31 @@ def train_am_for_epoch(
 
     total_loss = 0.0
     total_batches = 0
+    scaler = torch.cuda.amp.grad_scaler.GradScaler() if autocast else None
     for feats, _, refs, feat_lens, ref_lens in loader:
         feats = feats.to(device, non_blocking=non_blocking)
         refs = refs.to(device, non_blocking=non_blocking)
         feat_lens = feat_lens.to(device, non_blocking=non_blocking)
         optimizer.zero_grad()
-        if refs.dim() == 3:
-            refs = refs[..., 0]
-        feats, lens = random_shift(spec_augment(noise(feats), feat_lens), feat_lens)
-        logits, lens = model(
-            feats, feat_lens, params.dropout_prob, params.convolutional_dropout_2d
-        )
-        logits = torch.nn.functional.log_softmax(logits, 2)
-        loss = loss_fn(logits, refs, lens, ref_lens)
-        loss.backward()
+
+        with torch.cuda.amp.autocast(autocast):
+            if refs.dim() == 3:
+                refs = refs[..., 0]
+            feats, lens = random_shift(spec_augment(noise(feats), feat_lens), feat_lens)
+            logits, lens = model(
+                feats, feat_lens, params.dropout_prob, params.convolutional_dropout_2d
+            )
+            logits = torch.nn.functional.log_softmax(logits, 2)
+            loss = loss_fn(logits, refs, lens, ref_lens)
+        if autocast:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         loss = loss.item()
         del feats, refs, feat_lens, ref_lens, lens, logits
-        optimizer.step()
         total_loss += loss
         total_batches += 1
 
@@ -463,7 +475,7 @@ def train_am(
         train_data_params,
         batch_first=True,
         seed=training_params.seed,
-        pin_memory=device.type == "cuda",
+        pin_memory=False,  # https://github.com/pytorch/pytorch/issues/57273 for now
         num_workers=num_data_workers,
     )
     dev_loader = data.SpectEvaluationDataLoader(

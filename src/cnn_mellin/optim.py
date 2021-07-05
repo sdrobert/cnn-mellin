@@ -51,17 +51,6 @@ def init_study(
     num_filts, num_classes = running.get_filts_and_classes(train_dir)
     raw = num_filts == 1
 
-    if (
-        param_dict["training"].num_epochs is None
-        and not param_dict["training"].early_stopping_threshold
-        and "training.num_epochs" not in only
-        and "training.early_stopping_threshold" not in only
-    ):
-        raise ValueError(
-            "A trial has no way to stop. Set either training.num_epochs or "
-            "training.early_stopping_threshold"
-        )
-
     # determine things that won't make sense to train
     if raw:
         _chuck_set_from_only(
@@ -173,6 +162,17 @@ def init_study(
         )
 
     # get some other user restrictions
+    if param_dict["training"].num_epochs is None or "training.num_epochs" in only:
+        max_epochs = (
+            param_dict["training"].param.params()["num_epochs"].get_soft_bounds()[1]
+        )
+        if "training.num_epochs" not in only:
+            warnings.warn(
+                f"The upper bound on the number of epochs has been set to {max_epochs}."
+                "If this is undesired, set training.num_epochs in config file"
+            )
+    else:
+        max_epochs = param_dict["training"].num_epochs
     ds = data.SpectDataSet(
         train_dir,
         subset_ids=param_dict["data"].subset_ids
@@ -197,6 +197,7 @@ def init_study(
     study = optuna.create_study(storage=str(out_url), study_name=study_name)
     if raw:
         study.set_user_attr("raw", True)
+    study.set_user_attr("max_epochs", max_epochs)
     study.set_user_attr("device", str(device))
     study.set_user_attr("data_dir", train_dir)
     study.set_user_attr("train_ids", train_ids)
@@ -225,10 +226,12 @@ def get_forward_backward_memory(
     num_classes: int,
     max_frames: int,
     device: Union[str, torch.device],
-    runs: int = 5,
+    runs: int = 10,
+    autocast: bool = True,
 ) -> int:
 
     device = torch.device(device)
+    autocast = autocast & (device.type == "cuda")
 
     # do our best to stop deallocs from outside this scope being counted
     gc.collect()
@@ -247,22 +250,31 @@ def get_forward_backward_memory(
         model = models.AcousticModel(
             num_filts, num_classes + 1, param_dict["model"]
         ).to(device)
-        optim = param_dict["training"].optimizer(model.parameters(), lr=1e-4)
+        optimizer = param_dict["training"].optimizer(model.parameters(), lr=1e-4)
+        scaler = torch.cuda.amp.grad_scaler.GradScaler() if autocast else None
         x = torch.empty(
             param_dict["data"].batch_size, max_frames, num_filts, device=device
         )
         len_ = torch.full((param_dict["data"].batch_size,), max_frames, device=device)
-        optim.zero_grad()
-        logits, out_len = model(
-            x,
-            len_,
-            param_dict["training"].dropout_prob,
-            param_dict["training"].convolutional_dropout_2d,
-        )
-        z = logits.sum()
-        z.backward()
-        optim.step()
-        del model, optim, out_len, logits, x, len_, z
+        optimizer.zero_grad()
+        with torch.cuda.amp.autocast(autocast):
+            logits, out_len = model(
+                x,
+                len_,
+                param_dict["training"].dropout_prob,
+                param_dict["training"].convolutional_dropout_2d,
+            )
+            z = logits.sum()
+        if autocast:
+            scaler.scale(z).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            z.backward()
+            optimizer.step()
+        del model, optimizer, out_len, logits, x, len_, z
+        if scaler is not None:
+            del scaler
 
     if device.type == "cuda":
         return torch.cuda.max_memory_allocated(device)
@@ -302,7 +314,9 @@ def objective(trial: optuna.Trial) -> float:
             user_attrs["num_classes"],
             user_attrs["max_frames"],
             device,
+            autocast=param_dict["training"].autocast,
         )
+        trial.set_user_attr("forward_backward_memory", val)
         if val > user_attrs["mem_limit"]:
             raise optuna.exceptions.TrialPruned(
                 f"forward-backward footprint ({val / (1024 ** 3)} GB) exceeds "

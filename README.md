@@ -29,13 +29,13 @@ python prep/timit.py data/timit init_phn --lm
 #                    short integration every 2ms
 # - raw:             Raw audio
 # All representations assume 16kHz samples.
-feature_names=( fbank-81-10ms sigbank-41-2ms )
-for feature_name in "${feature_names[@]}"; do
-  python prep/timit.py data/timit torch_dir phn48 $feature_name \
-    --computer-json conf/feats/$feature_name.json
+feature_types=( fbank-81-10ms sigbank-41-2ms )
+for feature_type in "${feature_types[@]}"; do
+  python prep/timit.py data/timit torch_dir phn48 $feature_type \
+    --computer-json conf/feats/$feature_type.json
 done
 python prep/timit.py data/timit torch_dir phn48 raw --raw
-feature_names+=( raw )
+feature_types+=( raw )
 
 model_types=( mcorr lcorr )
 
@@ -51,62 +51,63 @@ Continues from above at Step 2
 # call cnn-mellin directly, but you'll want to configure a way of a) running
 # them in parallel and b) some stopping criterion.
 # 
-# STEP 2.1: create optuna experiments for model selection
-# N.B. all data augmentation (including dropout) is disabled during the search
-# to 
+# STEP 2.1: create optuna experiments for small model selection.
+# We consider any combination of model parameters for about 30 epochs using an
+# agressive 
 mkdir -p exp/logs
 for model_type in "${model_types[@]}"; do
-  for feature_name in "${feature_names[@]}"; do
+  for feature_type in "${feature_types[@]}"; do
     cnn-mellin \
-      --read-ini conf/optim/model-${model_type}.ini \
+      --read-ini conf/optim/model-${model_type}-sm.ini \
       --device cuda \
       optim \
-        --study-name model-${model_type}-${feature_name} \
+        --study-name model-${model_type}-sm-${feature_type} \
         sqlite:///exp/optim.db \
         init \
-          data/timit/${feature_name}/train \
+          data/timit/${feature_type}/train \
           --blacklist 'training.*' 'data.*' 'model.convolutional_mellin' \
-          --num-data-workers 4
+          --num-data-workers 4 \
+          --mem-limit-bytes "$(python -c 'print(5 * (1024 ** 3))')"
   done
 done
 
 # STEP 2.2: run a random hyperparameter search for a while
 for model_type in "${model_types[@]}"; do
-  for feature_name in "${feature_names[@]}"; do
-    sbatch -p t4v1 --qos normal --time 48:00:00 scripts/cnn_mellin.slrm  \
+  for feature_type in "${feature_types[@]}"; do
+    # sbatch -p t4v1 --qos normal --time 48:00:00 scripts/cnn_mellin.slrm
+    ./scripts/cnn_mellin.slrm \
       optim \
-        --study-name model-${model_type}-${feature_name} \
+        --study-name model-${model_type}-sm-${feature_type} \
         sqlite:///exp/optim.db \
         run \
-          --sampler tpe
-          --timeout 48:00:00
+          --sampler random
   done
 done
 
 # STEP 2.4: write best back to file to get ready for training optimization
 for model_type in "${model_types[@]}"; do
-  for feature_name in "${feature_names[@]}"; do
+  for feature_type in "${feature_types[@]}"; do
     cnn-mellin \
       optim \
-        --study-name model-${model_type}-${feature_name} \
+        --study-name model-${model_type}-${feature_type} \
         sqlite:///exp/optim.db \
         best \
-          conf/optim/train-${model_type}-${feature_name}.ini
+          conf/optim/train-${model_type}-${feature_type}.ini
   done
 done
 
 # STEP 2.5: create optuna experiments for training optimization
 # We don't optimize the learning rate b/c it's adaptive w/ adam
 for model_type in "${model_types[@]}"; do
-  for feature_name in "${feature_names[@]}"; do
+  for feature_type in "${feature_types[@]}"; do
     cnn-mellin \
-      --read-ini conf/optim/train-${model_type}-${feature_name}.ini \
+      --read-ini conf/optim/train-${model_type}-${feature_type}.ini \
       --device cuda \
       optim \
-        --study-name train-${model_type}-${feature_name} \
+        --study-name train-${model_type}-${feature_type} \
         sqlite:///exp/optim.db \
         init \
-          data/timit/${feature_name}/train \
+          data/timit/${feature_type}/train \
           --num-data-workers 4 \
           --whitelist \
             'training.dropout_prob' \
@@ -119,10 +120,10 @@ done
 
 # STEP 2.6: tpe
 for model_type in "${model_types[@]}"; do
-  for feature_name in "${feature_names[@]}"; do
+  for feature_type in "${feature_types[@]}"; do
     sbatch -p t4v1 --qos normal --time 24:00:00 scripts/cnn_mellin.slrm  \
       optim \
-        --study-name train-${model_type}-${feature_name} \
+        --study-name train-${model_type}-${feature_type} \
         sqlite:///exp/optim.db \
         run \
           --sampler tpe

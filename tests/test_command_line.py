@@ -18,10 +18,14 @@ def test_train_command(temp_dir, device, populate_torch_dir):
     with open(ini_file, "w") as file_:
         file_.write("[model]\n")
         file_.write("seed=1\n")
+        file_.write("window_size=1\n")
+        file_.write("convolutional_layers=0\n")
+        file_.write("recurrent_layers=0\n")
         file_.write("[training]\n")
         file_.write("dropout_prob=0.05\n")
         file_.write("num_epochs=2\n")
         file_.write("seed=2\n")
+        file_.write("keep_best_and_last_only=False\n")
     assert not get_torch_spect_data_dir_info(
         [train_dir, os.path.join(ext_dir, "train.info.ark")]
     )
@@ -36,7 +40,7 @@ def test_train_command(temp_dir, device, populate_torch_dir):
         train_dir,
         "--num-data-workers",
         "0",
-        "--quiet",
+        # "--quiet",
     ]
     assert not command_line.cnn_mellin(args)
     model_1_hist_dir = os.path.join(model_1_dir, "training")
@@ -97,7 +101,7 @@ def test_optim_init_command(temp_dir, populate_torch_dir):
     assert all(x.startswith("model.") for x in only)
 
 
-@pytest.mark.parametrize("sampler", ["tpe", "random", "cmaes", "nsgaii"])
+@pytest.mark.parametrize("sampler", ["tpe", "random", "nsgaii"])
 def test_optim_run_command(device, temp_dir, populate_torch_dir, sampler):
     C, F, V = 100, 5, 5
     train_dir = os.path.join(temp_dir, "train")
@@ -138,5 +142,7 @@ def test_optim_run_command(device, temp_dir, populate_torch_dir, sampler):
         common_args + ["run", "--sampler", sampler, "--num-trials", "2"]
     )
     study = optuna.load_study("optimize", db_url)
-    trials = study.get_trials(states=[optuna.trial.TrialState.COMPLETE])
+    trials = study.get_trials(
+        states=[optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED]
+    )
     assert len(trials) == 2

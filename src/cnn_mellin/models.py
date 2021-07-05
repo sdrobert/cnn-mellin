@@ -330,11 +330,11 @@ class AcousticModel(torch.nn.Module):
                     y = new_y + ry
                 x = new_x + rx
             else:
-                px_ = px if (x + 2 * px - kx) // sx + 1 >= 0 else px + 1
+                px_ = px if (x + 2 * px - kx) // sx + 1 > 0 else px + 1
                 if self.raw:
                     self.convs.append(torch.nn.Conv1d(ci, co, kx, sx, px_))
                 else:
-                    py_ = py if (y + 2 * py - ky) // sy + 1 >= 0 else py + 1
+                    py_ = py if (y + 2 * py - ky) // sy + 1 > 0 else py + 1
                     self.convs.append(
                         torch.nn.Conv2d(ci, co, (kx, ky), (sx, sy), (px_, py_))
                     )
@@ -376,6 +376,8 @@ class AcousticModel(torch.nn.Module):
             if x.size(1) == lens.size(0):
                 str_ += ". (batch dimension of x should be 0, not 1)"
             raise RuntimeError(str_)
+        if ((lens <= 0) | (lens > x.size(1))).any():
+            raise RuntimeError(f"lens must all be between [1, {lens.size(2)}]")
 
     def forward(
         self,
@@ -399,13 +401,17 @@ class AcousticModel(torch.nn.Module):
         x = x.unfold(1, self.params.window_size, self.params.window_stride).transpose(
             2, 3
         )  # (N, T', w, F)
-        lens_ = (lens - 1) // self.params.window_stride + 1
+        # all lengths are positive, so trunc = floor. Assuming trunc is more efficient
+        lens_ = (
+            torch.div(lens - 1, self.params.window_stride, rounding_mode="trunc") + 1
+        )
 
         # fuse the N and T' dimension together for now. No sense in performing
         # convolutions on windows of entirely padding
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, lens_.cpu(), batch_first=True, enforce_sorted=False
         )
+
         x, bs, si, ui = x.data, x.batch_sizes, x.sorted_indices, x.unsorted_indices
 
         # perform optional log compression, lift

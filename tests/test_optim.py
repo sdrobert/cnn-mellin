@@ -60,7 +60,8 @@ def test_init_study(temp_dir, populate_torch_dir, raw):
     assert attrs_1 == study_2.user_attrs
 
 
-def test_get_forward_backward_memory(device):
+@pytest.mark.parametrize("autocast", [True, False])
+def test_get_forward_backward_memory(device, autocast):
     # this is an inherently difficult thing to check since deallocated memory is
     # subtracted from the total. We'll get a lower bound from what should definitely
     # be remaining by the backward call (excludes intermediate values)
@@ -74,8 +75,12 @@ def test_get_forward_backward_memory(device):
     param_dict["training"].optimizer = torch.optim.SGD
     param_dict["data"].batch_size = N
     # FIXME(sdrobert): some lower bound would be nice
-    res = optim.get_forward_backward_memory(param_dict, F, V, T, device)
-    assert res == optim.get_forward_backward_memory(param_dict, F, V, T, device)
+    res = optim.get_forward_backward_memory(
+        param_dict, F, V, T, device, autocast=autocast
+    )
+    assert res == optim.get_forward_backward_memory(
+        param_dict, F, V, T, device, autocast=autocast
+    )
 
 
 def test_objective(device, temp_dir, populate_torch_dir):

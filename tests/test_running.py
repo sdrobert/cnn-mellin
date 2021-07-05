@@ -28,7 +28,13 @@ class DummyAM(torch.nn.Module):
         self.lift.reset_parameters()
         self.fc.reset_parameters()
 
-    def forward(self, x, lens, dropout_prob=0.0, is_2d=True):
+    def forward(
+        self,
+        x: torch.Tensor,
+        lens: torch.Tensor,
+        dropout_prob: float = 0.0,
+        is_2d: bool = True,
+    ):
         x = self.fc(self.lift(x.transpose(0, 1)))
         if is_2d:
             x = torch.nn.functional.dropout2d(x, dropout_prob, self.training)

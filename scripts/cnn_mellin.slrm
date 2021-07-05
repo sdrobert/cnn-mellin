@@ -10,6 +10,13 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=infinite
 
+if [ -z "${SLURM_JOB_ID}" ]; then
+  log_file="exp/logs/cnn_mellin.$(date +%s)"
+  echo "Looks like we aren't running slurm. Forking output to ${log_file}.{out,err}"
+  mkdir -p exp/logs
+  exec 1> >(tee -a "${log_file}.out") 2> >(tee -a "${log_file}.err" >&2)
+fi
+
 echo "$0 called with arguments: $*"
 
 # first determine if we've got cnn-mellin installed
@@ -28,6 +35,6 @@ fi
 
 # this loop is primarily for optim when an estimate caused an OOM exception.
 for x in $(seq 1 100); do
-  cnn-mellin "${args[@]}" && break
+  cnn-mellin "${args[@]}"
   echo -e "Call ended with error (attempt $x/100)"
 done

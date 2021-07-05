@@ -21,12 +21,12 @@ def test_model_parameters_are_same_after_seeded_reset():
 
 @pytest.mark.parametrize("mellin", [True, False], ids=("mcorr", "lcorr"))
 @pytest.mark.parametrize("rnn", [torch.nn.LSTM, torch.nn.RNN])
-@pytest.mark.parametrize("window_size", [40, 1], ids=('W=40', 'W=1'))
-@pytest.mark.parametrize("window_stride", [1, 2], ids=('w=1', 'w=2'))
-@pytest.mark.parametrize("time_factor", [1, 2], ids=('tf=1', 'tf=2'))
-@pytest.mark.parametrize("factor_sched", [1, 2], ids=('fs=1', 'fs=2'))
-@pytest.mark.parametrize("convolutional_layers", [0, 5], ids=('cl=0', 'cl=5'))
-@pytest.mark.parametrize("recurrent_layers", [0, 2], ids=('rl=0', 'rl=2'))
+@pytest.mark.parametrize("window_size", [40, 1], ids=("W=40", "W=1"))
+@pytest.mark.parametrize("window_stride", [1, 2], ids=("w=1", "w=2"))
+@pytest.mark.parametrize("time_factor", [1, 2], ids=("tf=1", "tf=2"))
+@pytest.mark.parametrize("factor_sched", [1, 2], ids=("fs=1", "fs=2"))
+@pytest.mark.parametrize("convolutional_layers", [0, 5], ids=("cl=0", "cl=5"))
+@pytest.mark.parametrize("recurrent_layers", [0, 2], ids=("rl=0", "rl=2"))
 @pytest.mark.parametrize("bidirectional", [True, False], ids=("bi", "uni"))
 @pytest.mark.parametrize("freq_factor,raw", [(1, True), (1, False), (2, False)])
 def test_can_run(

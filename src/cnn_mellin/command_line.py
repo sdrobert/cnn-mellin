@@ -207,9 +207,10 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         optim_init_subparser.add_argument(
             "--num-data-workers",
             type=int,
-            default=get_num_avail_cores() - 1,
+            default=min(get_num_avail_cores() - 1, 4),
             help="Number of background workers for training data loader. 0 is serial. "
-            "Defaults to one fewer than the number of virtual cores on the machine.",
+            "Defaults to the minimum of one fewer than the number of virtual cores on "
+            "the machine and 4.",
         )
 
         blacklist_whitelist_group = optim_init_subparser.add_mutually_exclusive_group()
@@ -236,7 +237,7 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         optim_run_subparser.add_argument(
             "--sampler",
             default="tpe",
-            choices=["tpe", "random", "cmaes", "nsgaii"],
+            choices=["tpe", "random", "nsgaii"],
             help="Which sampler to use in hyperparameter optimization. See "
             "https://optuna.readthedocs.io/en/stable/reference/samplers.html for more "
             "info",
@@ -322,6 +323,7 @@ def optim_init(options, param_dict):
         options.device,
         options.dev_proportion,
         options.mem_limit_bytes,
+        options.num_data_workers,
     )
 
 
@@ -335,14 +337,14 @@ def optim_run(options):
         )
     elif options.sampler == "random":
         sampler = optim.optuna.samplers.RandomSampler()
-    elif options.sampler == "cmaes":
-        sampler = optim.optuna.samplers.CmaEsSampler(consider_pruned_trials=True)
     elif options.sampler == "nsgaii":
         sampler = optim.optuna.samplers.NSGAIISampler()
     else:
         assert False
-    pruner = optim.optuna.pruners.HyperbandPruner()
-    study = optim.optuna.load_study(study_name, str(options.db_url), sampler, pruner)
+    study = optim.optuna.load_study(study_name, str(options.db_url), sampler)
+    study.pruner = optim.optuna.pruners.HyperbandPruner(
+        max_resource=study.user_attrs["max_epochs"]
+    )
     if study.user_attrs["device"] != str(options.device):
         warnings.warn(
             f"Device passed by command line ({options.device}) differs from the device "
