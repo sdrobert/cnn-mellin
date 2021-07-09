@@ -67,7 +67,7 @@ for model_type in "${model_types[@]}"; do
           data/timit/${feature_type}/train \
           --blacklist 'training.*' 'data.*' 'model.convolutional_mellin' \
           --num-data-workers 4 \
-          --mem-limit-bytes "$(python -c 'print(5 * (1024 ** 3))')"
+          --mem-limit-bytes "$(python -c 'print(6 * (1024 ** 3))')"
   done
 done
 
