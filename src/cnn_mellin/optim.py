@@ -342,6 +342,7 @@ def objective(trial: optuna.Trial) -> float:
             and (
                 x.find("out of memory") > -1
                 or x.find("Parameter configuration yields") > -1
+                or x.find("can't allocate") > -1
             )
             for x in e.args
         ):

@@ -307,14 +307,12 @@ class AcousticModel(torch.nn.Module):
             if params.convolutional_mellin:
                 new_x = mcorr_valid_size(kx, x, sx, dx, px)
                 exp_x = max(x // Dx, 1)
-                assert exp_x >= new_x
                 rx = exp_x - new_x
                 if self.raw:
                     self.convs.append(MCorr1d(ci, co, kx, sx, dx, px, rx))
                 else:
                     new_y = lcorr_valid_size(ky, y, sy, dy, py)
                     exp_y = max(y // Dy, 1)
-                    assert exp_y >= new_y
                     ry = exp_y - new_y
                     self.convs.append(
                         MCorrLCorr(
