@@ -357,9 +357,42 @@ def objective(trial: optuna.Trial) -> float:
     return er
 
 
-def get_best(study: optuna.Study) -> dict:
+def get_best(study: optuna.Study, independent: bool = False) -> dict:
     user_attrs = study.user_attrs
     global_dict = construct_default_param_dict()
     serialization.deserialize_from_dict(user_attrs["global_dict"], global_dict)
-    trial = study.best_trial
-    return poptuna.suggest_param_dict(trial, global_dict, set(user_attrs["only"]))
+    only = set(user_attrs["only"])
+    trial = study.best_trial  # even if doing independent, ensures one completed trial
+    if independent:
+        completed_trials = study.get_trials(
+            deepcopy=False, states=(optuna.trial.TrialState.COMPLETE,)
+        )
+        if not len(completed_trials):
+            raise RuntimeError()
+        name2value2rates = dict()
+        for trial in completed_trials:
+            for param_name, param_value in trial.params.items():
+                name2value2rates.setdefault(param_name, dict()).setdefault(
+                    param_value, []
+                ).append(trial.value)
+        param_dict = dict()
+        for param_name in only:
+            value2rates = name2value2rates.get(param_name, None)
+            if value2rates is None:
+                warnings.warn(
+                    f"No completed trials contain a parameter value for '{param_name}'"
+                )
+                continue
+            best_value, best_median = None, float("inf")
+            for value, rates in value2rates.items():
+                rates.sort()
+                i = len(rates) // 2
+                if len(rates) % 2:
+                    median = rates[i]
+                else:
+                    median = (rates[i - 1] + rates[i]) / 2
+                if median < best_median:
+                    best_value, best_median = value, median
+            param_dict[param_name] = best_value
+        trial = optuna.trial.FixedTrial(param_dict)
+    return poptuna.suggest_param_dict(trial, global_dict, only)

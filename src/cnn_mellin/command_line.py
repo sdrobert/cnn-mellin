@@ -280,6 +280,15 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             help="Write the file as this type. Default is to infer the file type based "
             "on file extension or, if it can't be, 'ini'",
         )
+        optim_best_subparser.add_argument(
+            "--independent",
+            action="store_true",
+            default=False,
+            help="If set, will return the best setting of each parameter independent "
+            "of the specific trials. This is determined as the setting whose median "
+            "error rate is lowest. WARNING: the combination returned by this setting "
+            "is not guaranteed to fit within the memory limits",
+        )
 
     return parser.parse_args(args)
 
@@ -359,7 +368,7 @@ def optim_best(options):
     if study_name is None:
         study_name = os.path.basename(options.db_url.database).split(".")[0]
     study = optim.optuna.load_study(study_name, str(options.db_url))
-    best_params = optim.get_best(study)
+    best_params = optim.get_best(study, options.independent)
 
     if options.force_type is None:
         ext = os.path.splitext(options.out_file.name)
