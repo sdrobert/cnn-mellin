@@ -28,6 +28,8 @@ def init_study(
     dev_prop: float = 0.1,
     mem_limit: int = 10 * (1024 ** 3),
     num_data_workers: int = get_num_avail_cores() - 1,
+    num_trials: Optional[int] = None,
+    pruner: str = "hyperband",
 ) -> optuna.Study:
     only = set(only)  # non-destructive
 
@@ -209,6 +211,8 @@ def init_study(
     study.set_user_attr("mem_limit", mem_limit)
     study.set_user_attr("only", sorted(only))
     study.set_user_attr("num_data_workers", num_data_workers)
+    study.set_user_attr("num_trials", num_trials)
+    study.set_user_attr("pruner", pruner)
     return study
 
 
@@ -286,8 +290,29 @@ def get_forward_backward_memory(
 
 def objective(trial: optuna.Trial) -> float:
     user_attrs = trial.study.user_attrs
-    device = torch.device(user_attrs["device"])
+
+    # check if we're done
+    num_trials = user_attrs["num_trials"]
+    if num_trials is not None:
+        num_active = sum(
+            1
+            for t in trial.study.trials
+            if t.state
+            in {
+                optuna.trial.TrialState.COMPLETE,
+                optuna.trial.TrialState.PRUNED,
+                optuna.trial.TrialState.RUNNING,
+            }
+        )
+        if num_active >= num_trials:
+            trial.study.stop()
+            if num_active > num_trials:
+                raise RuntimeError(
+                    f"Cancelling trial {trial.number}: already done {num_trials}"
+                )
+
     # try to make a tensor on the device. Raises a runtime error if it can't
+    device = torch.device(user_attrs["device"])
     torch.empty(1, device=device)
     global_dict = construct_default_param_dict()
     serialization.deserialize_from_dict(user_attrs["global_dict"], global_dict)
@@ -395,5 +420,18 @@ def get_best(study: optuna.Study, independent: bool = False) -> dict:
                 if median < best_median:
                     best_value, best_median = value, median
             param_dict[param_name] = best_value
+
+        # manual fixes that are necessary to ensure the parameter combinations make
+        # sense
+        if (
+            "model.convolutional_layers" in param_dict
+            and "model.convolutional_factor_schedule" in param_dict
+        ):
+            param_dict["model.convolutional_factor_schedule"] = min(
+                param_dict["model.convolutional_layers"] + 1,
+                param_dict["model.convolutional_factor_schedule"],
+            )
+
         trial = optuna.trial.FixedTrial(param_dict)
+    trial.study = study
     return poptuna.suggest_param_dict(trial, global_dict, only)

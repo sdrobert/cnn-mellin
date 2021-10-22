@@ -107,6 +107,7 @@ def test_objective(device, temp_dir, populate_torch_dir):
     assert len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE])) == 5
 
 
+@pytest.mark.cpu
 def test_get_best(temp_dir, populate_torch_dir):
     C, T, F, V = 5, 10, 10, 5
     train_dir = os.path.join(temp_dir, "train")
@@ -132,7 +133,7 @@ def test_get_best(temp_dir, populate_torch_dir):
         param_dict = poptuna.suggest_param_dict(trial, global_dict, only)
         return (param_dict["model"].window_size - 5) ** 2
 
-    study.optimize(objective, 1000)
+    study.optimize(objective, 100)
 
     param_dict = optim.get_best(study)
 

@@ -212,6 +212,20 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "Defaults to the minimum of one fewer than the number of virtual cores on "
             "the machine and 4.",
         )
+        optim_init_subparser.add_argument(
+            "--num-trials",
+            type=get_bounded_number_type(int, (1, float("inf"))),
+            default=None,
+            help="Total number of trials to finish in the study. Spread across all "
+            "processes and includes those already saved. Only those which end in "
+            "COMPLETE or PRUNED are counted.",
+        )
+        optim_init_subparser.add_argument(
+            "--pruner",
+            default="hyperband",
+            choices=["hyperband", "median", "none"],
+            help="Type of (performance) pruning to perform.",
+        )
 
         blacklist_whitelist_group = optim_init_subparser.add_mutually_exclusive_group()
         blacklist_whitelist_group.add_argument(
@@ -243,22 +257,23 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "info",
         )
 
-        end_group = optim_run_subparser.add_mutually_exclusive_group()
-        end_group.add_argument(
-            "--num-trials",
-            type=get_bounded_number_type(int, (0, float("inf"))),
-            default=None,
-            help="Number of trials to run before quitting. This is the total number "
-            "to run in *this* process - it ignores any previous or simultaneous trials",
-        )
-        end_group.add_argument(
-            "--timeout",
-            type=hhmmss_type,
-            default=None,
-            metavar="[[HH:]MM:]:SS.xxx",
-            help="Length of time to run the study before quitting. This is the total "
-            "length of *this* process - it ignores any previous or simultaneous trials",
-        )
+        # end_group = optim_run_subparser.add_mutually_exclusive_group()
+        # end_group.add_argument(
+        #     "--num-trials",
+        #     type=get_bounded_number_type(int, (1, float("inf"))),
+        #     default=None,
+        #     help="Total number of trials to finish in the study. Spread across all "
+        #     "processes and includes those already saved. Only those which end in "
+        #     "COMPLETE or PRUNED are counted.",
+        # )
+        # end_group.add_argument(
+        #     "--timeout",
+        #     type=hhmmss_type,
+        #     default=None,
+        #     metavar="[[HH:]MM:]:SS.xxx",
+        #     help="Length of time to run the study before quitting. This is the total "
+        #     "length of *this* process - it ignores any previous or simultaneous trials",
+        # )
 
         optim_best_subparser = optim_subparsers.add_parser(
             "best",
@@ -288,6 +303,35 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "of the specific trials. This is determined as the setting whose median "
             "error rate is lowest. WARNING: the combination returned by this setting "
             "is not guaranteed to fit within the memory limits",
+        )
+
+        optim_important_subparser = optim_subparsers.add_parser(
+            "important",
+            help="Write most important parameters of hyperparameter search to file or "
+            "stdout, one per line",
+        )
+        optim_important_subparser.add_argument(
+            "out_file",
+            nargs="?",
+            type=argparse.FileType("w"),
+            default=sys.stdout,
+            help="File to write to. Defaults to '-' (stdout)",
+        )
+
+        selection_group = optim_important_subparser.add_mutually_exclusive_group()
+        selection_group.add_argument(
+            "--top-k",
+            type=get_bounded_number_type(int, (0, float("inf"))),
+            default=5,
+            help="The number of the most important samples to keep.",
+        )
+        selection_group.add_argument(
+            "--threshold",
+            type=get_bounded_number_type(float, (0.0, 1.0), False),
+            default=None,
+            help="If set, instead of returning the top k parameters, will return any "
+            "parameter with a share of the importance greater than or equal to this "
+            "value (between 0.0 and 1.0).",
         )
 
     return parser.parse_args(args)
@@ -333,6 +377,8 @@ def optim_init(options, param_dict):
         options.dev_proportion,
         options.mem_limit_bytes,
         options.num_data_workers,
+        options.num_trials,
+        options.pruner,
     )
 
 
@@ -351,16 +397,23 @@ def optim_run(options):
     else:
         assert False
     study = optim.optuna.load_study(study_name, str(options.db_url), sampler)
-    study.pruner = optim.optuna.pruners.HyperbandPruner(
-        max_resource=study.user_attrs["max_epochs"]
-    )
+    if study.user_attrs["pruner"] == "hyperband":
+        study.pruner = optim.optuna.pruners.HyperbandPruner(
+            max_resource=study.user_attrs["max_epochs"]
+        )
+    elif study.user_attrs["pruner"] == "median":
+        study.pruner = optim.optuna.pruners.MedianPruner()
+    elif study.user_attrs["pruner"] == "none":
+        study.pruner = optim.optuna.pruners.NopPruner()
+    else:
+        raise NotImplementedError
     if study.user_attrs["device"] != str(options.device):
         warnings.warn(
             f"Device passed by command line ({options.device}) differs from the device "
             f"the study was initialized with ({study.user_attrs['device']}). Will use "
             "the latter."
         )
-    study.optimize(optim.objective, options.num_trials, options.timeout)
+    study.optimize(optim.objective)
 
 
 def optim_best(options):
@@ -387,6 +440,26 @@ def optim_best(options):
         serialization.serialize_to_yaml(options.out_file, best_params)
 
 
+def optim_important(options):
+    study_name = options.study_name
+    if study_name is None:
+        study_name = os.path.basename(options.db_url.database).split(".")[0]
+    study = optim.optuna.load_study(study_name, str(options.db_url))
+
+    importances = optim.optuna.importance.get_param_importances(study)
+    kept = set()
+    for param, importance in importances.items():
+        if (options.threshold is not None and importance < options.threshold) or (
+            len(kept) == options.top_k
+        ):
+            break
+        kept.add(param)
+
+    for param in sorted(kept):
+        options.out_file.write(param)
+        options.out_file.write("\n")
+
+
 def cnn_mellin(args: Optional[Sequence[str]] = None):
     param_dict = construct_default_param_dict()
     options = parse_args(args, param_dict)
@@ -400,3 +473,5 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
             optim_run(options)
         elif options.optim_command == "best":
             optim_best(options)
+        elif options.optim_command == "important":
+            optim_important(options)

@@ -2,19 +2,18 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=20G
+#SBATCH --mem=25G
 #SBATCH --export=ALL
-#SBATCH --output=exp/logs/slurm-%J.out
-#SBATCH --error=exp/logs/slurm-%J.err
+#SBATCH --output=exp/logs/slurm-%J.log
 #SBATCH --open-mode=append
 #SBATCH --gres=gpu:1
 #SBATCH --time=infinite
 
 if [ -z "${SLURM_JOB_ID}" ]; then
   log_file="exp/logs/cnn_mellin.$(date +%s)"
-  echo "Looks like we aren't running slurm. Forking output to ${log_file}.{out,err}"
+  echo "Looks like we aren't running slurm. Forking output to ${log_file}.log"
   mkdir -p exp/logs
-  exec 1> >(tee -a "${log_file}.out") 2> >(tee -a "${log_file}.err" >&2)
+  exec > >(tee -a "${log_file}.log")
 fi
 
 echo "$0 called with arguments: $*"
@@ -31,6 +30,9 @@ if ! [[ "${args[*]}" =~ --device ]]; then
   device_flag="--device=$( python -c 'import torch; print("cuda" if torch.cuda.is_available() else "cpu")')"
   echo "Could not find --device flag. Adding '$device_flag'"
   args=( "$device_flag" "${args[@]}" )
+fi
+if [[ "${args[*]}" =~ --device=cuda ]]; then
+  nvidia-smi
 fi
 
 # this loop is primarily for optim when an estimate caused an OOM exception.

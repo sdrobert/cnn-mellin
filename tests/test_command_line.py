@@ -25,7 +25,7 @@ def test_train_command(temp_dir, device, populate_torch_dir):
         file_.write("dropout_prob=0.05\n")
         file_.write("num_epochs=2\n")
         file_.write("seed=2\n")
-        file_.write("keep_best_and_last_only=False\n")
+        file_.write("keep_last_and_best_only=False\n")
     assert not get_torch_spect_data_dir_info(
         [train_dir, os.path.join(ext_dir, "train.info.ark")]
     )
@@ -136,11 +136,11 @@ def test_optim_run_command(device, temp_dir, populate_torch_dir, sampler):
             train_dir,
             "--whitelist",
             r"training\.log10_learning_rate",
+            "--num-trials",
+            "2",
         ]
     )
-    assert not command_line.cnn_mellin(
-        common_args + ["run", "--sampler", sampler, "--num-trials", "2"]
-    )
+    assert not command_line.cnn_mellin(common_args + ["run", "--sampler", sampler])
     study = optuna.load_study("optimize", db_url)
     trials = study.get_trials(
         states=[optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED]
