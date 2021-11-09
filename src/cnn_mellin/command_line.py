@@ -8,6 +8,7 @@ import sys
 import re
 
 from typing import Any, Optional, Sequence, Text, Union
+from tempfile import TemporaryDirectory
 
 import torch
 import cnn_mellin.models as models
@@ -256,6 +257,22 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "https://optuna.readthedocs.io/en/stable/reference/samplers.html for more "
             "info",
         )
+        optim_run_subparser.add_argument(
+            "--model-dir",
+            type=writable_dir,
+            default=None,
+            help="Path to save temporary model/optimze checkpoints to. By default, "
+            "uses tempfile.TemporaryDirectory(). Used both to recover the optimal "
+            "error rates and to checkpoint in case of preemption",
+        )
+        optim_run_subparser.add_argument(
+            "--max-failed-retries",
+            type=get_bounded_number_type(int, (0, float("inf"))),
+            default=10,
+            help="Total number of times to retry a failed trial before giving up. As "
+            "memory-related errors are caught and pruned, this primarily serves to "
+            "handle preemption",
+        )
 
         # end_group = optim_run_subparser.add_mutually_exclusive_group()
         # end_group.add_argument(
@@ -396,7 +413,14 @@ def optim_run(options):
         sampler = optim.optuna.samplers.NSGAIISampler()
     else:
         assert False
-    study = optim.optuna.load_study(study_name, str(options.db_url), sampler)
+    storage = optim.optuna.storages.RDBStorage(
+        str(options.db_url),
+        heartbeat_interval=1,
+        failed_trial_callback=optim.optuna.storages.RetryFailedTrialCallback(
+            max_retry=options.max_failed_retries
+        ),
+    )
+    study = optim.optuna.load_study(study_name, storage, sampler)
     if study.user_attrs["pruner"] == "hyperband":
         study.pruner = optim.optuna.pruners.HyperbandPruner(
             max_resource=study.user_attrs["max_epochs"]
@@ -413,7 +437,11 @@ def optim_run(options):
             f"the study was initialized with ({study.user_attrs['device']}). Will use "
             "the latter."
         )
-    study.optimize(optim.objective)
+    checkpoint_dir = options.model_dir
+    if checkpoint_dir is None:
+        checkpoint_dir_ = TemporaryDirectory()  # keep in scope
+        checkpoint_dir = checkpoint_dir_.name
+    study.optimize(lambda trial: optim.objective(trial, checkpoint_dir))
 
 
 def optim_best(options):

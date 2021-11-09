@@ -5,6 +5,7 @@ import gc
 import tracemalloc
 
 from copy import deepcopy
+from shutil import rmtree
 
 import torch
 import optuna
@@ -288,7 +289,7 @@ def get_forward_backward_memory(
         return peak
 
 
-def objective(trial: optuna.Trial) -> float:
+def objective(trial: optuna.Trial, checkpoint_dir: Optional[str] = None) -> float:
     user_attrs = trial.study.user_attrs
 
     # check if we're done
@@ -310,6 +311,14 @@ def objective(trial: optuna.Trial) -> float:
                 raise RuntimeError(
                     f"Cancelling trial {trial.number}: already done {num_trials}"
                 )
+
+    if checkpoint_dir is not None:
+        # determine the appropriate subdirectory
+        trial_no = optuna.storages.RetryFailedTrialCallback.retried_trial_number(trial)
+        if trial_no is None:
+            trial_no = trial.number
+        checkpoint_dir = os.path.join(checkpoint_dir, f"{trial_no:07d}")
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     # try to make a tensor on the device. Raises a runtime error if it can't
     device = torch.device(user_attrs["device"])
@@ -333,15 +342,18 @@ def objective(trial: optuna.Trial) -> float:
     raise_ = None
     try:
 
-        val = get_forward_backward_memory(
-            param_dict,
-            user_attrs["num_filts"],
-            user_attrs["num_classes"],
-            user_attrs["max_frames"],
-            device,
-            autocast=param_dict["training"].autocast,
-        )
-        trial.set_user_attr("forward_backward_memory", val)
+        # check that the forward-backward memory is less than the threshold.
+        val = user_attrs.get("forward_backward_memory", None)
+        if val is None:
+            val = get_forward_backward_memory(
+                param_dict,
+                user_attrs["num_filts"],
+                user_attrs["num_classes"],
+                user_attrs["max_frames"],
+                device,
+                autocast=param_dict["training"].autocast,
+            )
+            trial.set_user_attr("forward_backward_memory", val)
         if val > user_attrs["mem_limit"]:
             raise optuna.exceptions.TrialPruned(
                 f"forward-backward footprint ({val / (1024 ** 3)} GB) exceeds "
@@ -354,7 +366,7 @@ def objective(trial: optuna.Trial) -> float:
             param_dict["data"],
             user_attrs["data_dir"],
             user_attrs["data_dir"],
-            None,
+            checkpoint_dir,
             device,
             user_attrs["num_data_workers"],
             [pruner_callback],
@@ -376,6 +388,10 @@ def objective(trial: optuna.Trial) -> float:
             raise
     finally:
         gc.collect()
+
+    if checkpoint_dir is not None:
+        # never used again
+        rmtree(checkpoint_dir, ignore_errors=True)
 
     if raise_:
         raise optuna.exceptions.TrialPruned(*raise_)

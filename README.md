@@ -56,7 +56,7 @@ locks](https://www.sqlite.org/faq.html#q5)).
 # agressive memory limit.
 mkdir -p exp/logs
 gpu_mem_limit_sm="$(python -c 'print(6 * (1024 ** 3))')"
-num_trials_sm=512
+num_trials_sm=128
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
     cnn-mellin \

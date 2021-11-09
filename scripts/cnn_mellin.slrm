@@ -9,11 +9,16 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=infinite
 
+model_dir=
+slurm_model_dir="/checkpoint/sdrobert/${SLURM_JOB_ID}"
+
 if [ -z "${SLURM_JOB_ID}" ]; then
   log_file="exp/logs/cnn_mellin.$(date +%s)"
   echo "Looks like we aren't running slurm. Forking output to ${log_file}.log"
   mkdir -p exp/logs
   exec > >(tee -a "${log_file}.log")
+else
+  model_dir="${slurm_model_dir}"
 fi
 
 echo "$0 called with arguments: $*"
@@ -24,8 +29,16 @@ if ! which cnn-mellin > /dev/null ; then
   exit 1
 fi
 
-# set device flag if we have it
 args=( "$@" )
+
+# set model flag if we have it
+if ! [[ "${args[*]}" =~ --model-dir ]] && ! [ -z "${model_dir}" ]; then
+  model_flag="--model-dir=${slurm_model_dir}"
+  echo "Could not find --model-dir flag. Adding '${model_flag}'"
+  args+=( "$model_flag" )
+fi
+
+# set device flag if we have it
 if ! [[ "${args[*]}" =~ --device ]]; then
   device_flag="--device=$( python -c 'import torch; print("cuda" if torch.cuda.is_available() else "cpu")')"
   echo "Could not find --device flag. Adding '$device_flag'"
