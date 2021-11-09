@@ -441,7 +441,19 @@ def optim_run(options):
     if checkpoint_dir is None:
         checkpoint_dir_ = TemporaryDirectory()  # keep in scope
         checkpoint_dir = checkpoint_dir_.name
-    study.optimize(lambda trial: optim.objective(trial, checkpoint_dir))
+    study.optimize(
+        lambda trial: optim.objective(trial, checkpoint_dir),
+        callbacks=[
+            optim.optuna.study.MaxTrialsCallback(
+                study.user_attrs["num_trials"],
+                states=(
+                    optim.optuna.trial.TrialState.COMPLETE,
+                    optim.optuna.trial.TrialState.PRUNED,
+                    optim.optuna.trial.TrialState.RUNNING,
+                ),
+            )
+        ],
+    )
 
 
 def optim_best(options):

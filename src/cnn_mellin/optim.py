@@ -292,26 +292,6 @@ def get_forward_backward_memory(
 def objective(trial: optuna.Trial, checkpoint_dir: Optional[str] = None) -> float:
     user_attrs = trial.study.user_attrs
 
-    # check if we're done
-    num_trials = user_attrs["num_trials"]
-    if num_trials is not None:
-        num_active = sum(
-            1
-            for t in trial.study.trials
-            if t.state
-            in {
-                optuna.trial.TrialState.COMPLETE,
-                optuna.trial.TrialState.PRUNED,
-                optuna.trial.TrialState.RUNNING,
-            }
-        )
-        if num_active >= num_trials:
-            trial.study.stop()
-            if num_active > num_trials:
-                raise RuntimeError(
-                    f"Cancelling trial {trial.number}: already done {num_trials}"
-                )
-
     if checkpoint_dir is not None:
         # determine the appropriate subdirectory
         trial_no = optuna.storages.RetryFailedTrialCallback.retried_trial_number(trial)
