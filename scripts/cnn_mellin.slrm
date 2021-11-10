@@ -13,10 +13,10 @@ model_dir=
 slurm_model_dir="/checkpoint/sdrobert/${SLURM_JOB_ID}"
 
 if [ -z "${SLURM_JOB_ID}" ]; then
-  log_file="exp/logs/cnn_mellin.$(date +%s)"
-  echo "Looks like we aren't running slurm. Forking output to ${log_file}.log"
+  log_file="exp/logs/cnn_mellin.$(date +%s).log"
+  echo "Looks like we aren't running slurm. Forking output to ${log_file}"
   mkdir -p exp/logs
-  exec > >(tee -a "${log_file}.log")
+  exec > >(tee "${log_file}") 2>&1
 else
   model_dir="${slurm_model_dir}"
 fi

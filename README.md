@@ -41,12 +41,21 @@ model_types=( mcorr lcorr )
 
 ### Hyperparameter optimization recipe
 
-Continues from above at Step 2. If you plan on running more than one Optuna
-instance simultaneously, you might want to change the backend from SQLite to
-something else if you're using an NFS file system ([it doesn't have file
-locks](https://www.sqlite.org/faq.html#q5)).
+Continues from above at Step 2. We rely on PostgreSQL since the built-in
+backend, SQLite, deadlocks for parallel reads with the heartbeat. If you don't
+do parallel reads of the database file, you can probably go with SQLite.
 
 ``` python
+# setting up the database
+db_url=postgresql+pg8000://optuna@localhost/optim
+mkdir -p exp/logs
+initdb -D exp/optim
+pg_ctl -D exp/optim -l exp/logs/optim.log start
+createuser optuna
+# dropdb optim  # clear existing results
+createdb --owner=optuna optim
+
+
 # Note we're using slurm and sbatch to spawn jobs. You can just as easily
 # call cnn-mellin directly, but you'll want to configure a way of a) running
 # them in parallel and b) some stopping criterion.
@@ -54,7 +63,6 @@ locks](https://www.sqlite.org/faq.html#q5)).
 # STEP 2.1: create optuna experiments for small model selection.
 # We consider any combination of model parameters for about 30 epochs using an
 # agressive memory limit.
-mkdir -p exp/logs
 gpu_mem_limit_sm="$(python -c 'print(6 * (1024 ** 3))')"
 num_trials_sm=128
 for model_type in "${model_types[@]}"; do
@@ -64,7 +72,7 @@ for model_type in "${model_types[@]}"; do
       --device cuda \
       optim \
         --study-name model-${model_type}-sm-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         init \
           data/timit/${feature_type}/train \
           --blacklist 'training.*' 'data.*' 'model.convolutional_mellin' \
@@ -81,7 +89,7 @@ for model_type in "${model_types[@]}"; do
     sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
       optim \
         --study-name model-${model_type}-sm-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         run \
           --sampler random
   done
@@ -99,14 +107,14 @@ for model_type in "${model_types[@]}"; do
       cnn-mellin \
         optim \
           --study-name model-${model_type}-sm-${feature_type} \
-          sqlite:///exp/optim.db \
+          "$db_url" \
           important \
             --top-k=${top_k_lg} \
             exp/conf/model-${model_type}-lg-${feature_type}.params
       cnn-mellin \
         optim \
           --study-name model-${model_type}-sm-${feature_type} \
-          sqlite:///exp/optim.db \
+          "$db_url" \
           best \
             --independent \
             exp/conf/model-${model_type}-lg-${feature_type}.ini
@@ -115,7 +123,7 @@ for model_type in "${model_types[@]}"; do
         --device cuda \
         optim \
           --study-name model-${model_type}-lg-${feature_type} \
-          sqlite:///exp/optim.db \
+          "$db_url" \
           init \
             data/timit/${feature_type}/train \
             --whitelist $(cat exp/conf/model-${model_type}-lg-${feature_type}.params) \
@@ -130,7 +138,7 @@ for model_type in "${model_types[@]}"; do
     sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
       optim \
         --study-name model-${model_type}-lg-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         run \
           --sampler tpe
   done
@@ -144,7 +152,7 @@ for model_type in "${model_types[@]}"; do
     cnn-mellin \
       optim \
         --study-name model-${model_type}-sm-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         best \
           - \
       | sed 's/\(max_.*_mask\)[ ]*=.*/\1 = 10000/g' \
@@ -154,7 +162,7 @@ for model_type in "${model_types[@]}"; do
       --device cuda \
       optim \
         --study-name train-${model_type}-sm-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         init \
           data/timit/${feature_type}/train \
           --blacklist 'model.*' 'training.max_.*_mask' 'training.num_epochs' 'training.early_.*' \
@@ -169,7 +177,7 @@ for model_type in "${model_types[@]}"; do
     sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
       optim \
         --study-name train-${model_type}-sm-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         run \
           --sampler random
   done
@@ -185,14 +193,14 @@ for model_type in "${model_types[@]}"; do
       cnn-mellin \
         optim \
           --study-name train-${model_type}-sm-${feature_type} \
-          sqlite:///exp/optim.db \
+          "$db_url" \
           important \
             --top-k=${top_k_md} \
             exp/conf/train-${model_type}-md-${feature_type}.params
       cnn-mellin \
         optim \
           --study-name train-${model_type}-sm-${feature_type} \
-          sqlite:///exp/optim.db \
+          "$db_url" \
           best \
             --independent \
             exp/conf/train-${model_type}-md-${feature_type}.ini
@@ -201,7 +209,7 @@ for model_type in "${model_types[@]}"; do
         --device cuda \
         optim \
           --study-name train-${model_type}-md-${feature_type} \
-          sqlite:///exp/optim.db \
+          "$db_url" \
           init \
             data/timit/${feature_type}/train \
             --whitelist $(cat exp/conf/train-${model_type}-md-${feature_type}.params) \
@@ -216,7 +224,7 @@ for model_type in "${model_types[@]}"; do
     sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
       optim \
         --study-name train-${model_type}-md-${feature_type} \
-        sqlite:///exp/optim.db \
+        "$db_url" \
         run \
           --sampler random
   done

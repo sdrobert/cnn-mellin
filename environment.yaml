@@ -15,5 +15,7 @@ dependencies:
   - pytorch=1.9.0
   - tqdm
   - scikit-learn
+  - postgresql
+  - pg8000
   - pip: # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
     - "git+https://github.com/sdrobert/pydrobert-pytorch.git@7abad0dbb2e80b4267aebcee492aa9fd7d83ea3f"

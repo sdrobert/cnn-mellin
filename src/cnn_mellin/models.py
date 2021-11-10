@@ -31,9 +31,9 @@ class AcousticModelParams(param.Parameterized):
         "after log compression (if enabled)",
     )
     window_size = param.Integer(
-        10,
+        5,
         bounds=(1, None),
-        softbounds=(2, 20),
+        softbounds=(2, 10),
         doc="The total number of audio elements per window in time",
     )
     window_stride = param.Integer(
@@ -45,7 +45,7 @@ class AcousticModelParams(param.Parameterized):
     convolutional_kernel_time = param.Integer(
         3,
         bounds=(1, None),
-        softbounds=(1, 20),
+        softbounds=(1, 10),
         doc="The width of convolutional kernels along the time dimension",
     )
     convolutional_kernel_freq = param.Integer(
@@ -57,13 +57,13 @@ class AcousticModelParams(param.Parameterized):
     convolutional_initial_channels = param.Integer(
         64,
         bounds=(1, None),
-        softbounds=(1, 128),
+        softbounds=(16, 64),
         doc="The number of channels in the initial convolutional layer",
     )
     convolutional_layers = param.Integer(
         5,
         bounds=(0, None),
-        softbounds=(0, 10),
+        softbounds=(1, 6),
         doc="The number of layers in the convolutional part of the network",
     )
     convolutional_mellin = param.Boolean(
@@ -73,21 +73,21 @@ class AcousticModelParams(param.Parameterized):
     convolutional_time_factor = param.Integer(
         2,
         bounds=(1, None),
-        softbounds=(1, 5),
+        softbounds=(1, 4),
         doc="The factor by which to reduce the size of the input along the "
         "time dimension between convolutional layers",
     )
     convolutional_freq_factor = param.Integer(
         1,
         bounds=(1, None),
-        softbounds=(1, 5),
+        softbounds=(1, 2),
         doc="The factor by which to reduce the size of the input along the "
         "frequency dimension after convolutional_factor_schedule layers",
     )
     convolutional_channel_factor = param.Integer(
         1,
         bounds=(1, None),
-        softbounds=(1, 5),
+        softbounds=(1, 2),
         doc="The factor by which to increase the size of the channel dimension after "
         "convolutional_factor_schedule layers",
     )
@@ -115,7 +115,7 @@ class AcousticModelParams(param.Parameterized):
     recurrent_layers = param.Integer(
         2,
         bounds=(0, None),
-        softbounds=(0, 5),
+        softbounds=(1, 10),
         doc="The number of recurrent layers in the recurrent part of the network",
     )
     recurrent_type = param.ObjectSelector(
@@ -218,7 +218,7 @@ class AcousticModelParams(param.Parameterized):
             check_and_set("convolutional_mellin")
             check_and_set("convolutional_kernel_time")
             check_and_set("convolutional_kernel_freq")
-            check_and_set("convolutional_initial_channels")
+            check_and_set("convolutional_initial_channels", False, True)
             check_and_set(
                 "convolutional_factor_schedule", high=params.convolutional_layers + 1
             )
