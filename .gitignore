@@ -115,3 +115,4 @@ conf/slurm.conf
 .gitversion
 .vscode
 version.py
+venv
