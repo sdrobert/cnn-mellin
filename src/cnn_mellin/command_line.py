@@ -415,7 +415,7 @@ def optim_run(options):
         assert False
     storage = optim.optuna.storages.RDBStorage(
         str(options.db_url),
-        heartbeat_interval=1,
+        heartbeat_interval=60,
         failed_trial_callback=optim.optuna.storages.RetryFailedTrialCallback(
             max_retry=options.max_failed_retries
         ),
@@ -441,18 +441,32 @@ def optim_run(options):
     if checkpoint_dir is None:
         checkpoint_dir_ = TemporaryDirectory()  # keep in scope
         checkpoint_dir = checkpoint_dir_.name
+    num_complete = len(
+        study.get_trials(
+            False,
+            states=(
+                optim.optuna.trial.TrialState.COMPLETE,
+                optim.optuna.trial.TrialState.PRUNED,
+                optim.optuna.trial.TrialState.RUNNING,
+            ),
+        )
+    )
+    if num_complete >= study.user_attrs["num_trials"]:
+        warnings.warn(
+            f"Not starting. Done {num_complete}/{study.user_attrs['num_trials']} trials"
+        )
+        return
+    max_trial_callback = optim.optuna.study.MaxTrialsCallback(
+        study.user_attrs["num_trials"],
+        states=(
+            optim.optuna.trial.TrialState.COMPLETE,
+            optim.optuna.trial.TrialState.PRUNED,
+            optim.optuna.trial.TrialState.RUNNING,
+        ),
+    )
     study.optimize(
         lambda trial: optim.objective(trial, checkpoint_dir),
-        callbacks=[
-            optim.optuna.study.MaxTrialsCallback(
-                study.user_attrs["num_trials"],
-                states=(
-                    optim.optuna.trial.TrialState.COMPLETE,
-                    optim.optuna.trial.TrialState.PRUNED,
-                    optim.optuna.trial.TrialState.RUNNING,
-                ),
-            )
-        ],
+        callbacks=[max_trial_callback],
     )
 
 

@@ -35,8 +35,12 @@ if [[ "${args[*]}" =~ --device=cuda ]]; then
   nvidia-smi
 fi
 
+echo "Sleeping for 120 secs to wear out heartbeat"
+sleep 120
+
 # this loop is primarily for optim when an estimate caused an OOM exception.
 for x in $(seq 1 100); do
-  cnn-mellin "${args[@]}"
+  echo "Calling (attempt $x/100)"
+  cnn-mellin "${args[@]}" && exit 0
   echo -e "Call ended with error (attempt $x/100)"
 done
