@@ -5,18 +5,13 @@
 This recipe can be ported to Windows relatively easily.
 
 ``` sh
-# Replicate the conda environment + install this
-conda env create -f environment.yaml
-conda activate cnn-mellin
-pip install .
-
-# STEP 1.1: initial dataset prep
-# Assuming TIMIT with fbank features. Easily swap for WSJ, GGWS. See
-# https://github.com/sdrobert/pytorch-database-prep
-python prep/timit.py data/timit preamble /path/to/timit
-python prep/timit.py data/timit init_phn --lm
-
-# STEP 1.2: construct feature representations
+# environment variables used anywhere at all. Put up front for easy
+# manipulation
+db_uname=optuna
+db_server=localhost
+db_name=optim
+db_url=postgresql+pg8000://${db_uname}@${db_server}/${db_name}
+model_types=( mcorr lcorr )
 # Only one representation is necessary for training a model and each
 # representation produces models that will not (in general) perform well on
 # other representations.
@@ -26,17 +21,30 @@ python prep/timit.py data/timit init_phn --lm
 #                    short integration every 2ms
 # - raw:             Raw audio
 # All representations assume 16kHz samples.
-feature_types=( fbank-81-10ms sigbank-41-2ms )
-for feature_type in "${feature_types[@]}"; do
-  python prep/timit.py data/timit torch_dir phn48 $feature_type \
-    --computer-json conf/feats/$feature_type.json
-done
-python prep/timit.py data/timit torch_dir phn48 raw --raw
-feature_types+=( raw )
+feature_types=( fbank-81-10ms sigbank-41-2ms raw )
+gpu_mem_limit_sm="$(python -c 'print(6 * (1024 ** 3))')"
+num_trials_sm=128
+top_k_md=10
+gpu_mem_limit_md="$(python -c 'print(9 * (1024 ** 3))')"
+top_k_lg=5
+gpu_mem_limit_lg="$(python -c 'print(12 * (1024 ** 3))')"
+optim_command="sbatch scripts/cnn_mellin.slrm"
+timit_prep_cmd="sbatch scripts/timit_prep.slrm"
+timit_dir="$(cd ~/Databases/TIMIT; pwd -P)"
 
-model_types=( mcorr lcorr )
+mkdir -p exp/logs
 
-# STEP 2 (optional): hyperparameter optimization (see subsection below)
+# Replicate the conda environment + install this
+conda env create -f environment.yaml
+conda activate cnn-mellin
+pip install .
+
+# STEP 1: timit feature/database prep. Consult the script for more info
+$timit_prep_cmd "$timit_dir" "${feature_types[@]}"
+
+# STEP 2 (optional): hyperparameter search. Consult below section for more
+# info
+
 ```
 
 ### Hyperparameter optimization recipe
@@ -47,24 +55,17 @@ do parallel reads of the database file, you can probably go with SQLite.
 
 ``` python
 # setting up the database
-db_url=postgresql+pg8000://optuna@localhost/optim
 mkdir -p exp/logs
-initdb -D exp/optim
-pg_ctl -D exp/optim -l exp/logs/optim.log start
-createuser optuna
-# dropdb optim  # clear existing results
-createdb --owner=optuna optim
+initdb -D exp/${db_name}
+pg_ctl -D exp/${db_name} start
+createuser ${db_uname}
+# dropdb ${db_name}  # clear existing results
+createdb --owner=${db_uname} ${db_name}
 
-
-# Note we're using slurm and sbatch to spawn jobs. You can just as easily
-# call cnn-mellin directly, but you'll want to configure a way of a) running
-# them in parallel and b) some stopping criterion.
-# 
 # STEP 2.1: create optuna experiments for small model selection.
 # We consider any combination of model parameters for about 30 epochs using an
 # agressive memory limit.
-gpu_mem_limit_sm="$(python -c 'print(6 * (1024 ** 3))')"
-num_trials_sm=128
+
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
     cnn-mellin \
@@ -86,7 +87,7 @@ done
 # STEP 2.2: run a random hyperparameter search for a while
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
-    sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
+    $optim_command \
       optim \
         --study-name model-${model_type}-sm-${feature_type} \
         "$db_url" \
@@ -99,8 +100,7 @@ done
 # The rest will take on the setting with the lowest median error rate
 # independent on the other settings. Then use those parameters to construct
 # new optuna experiments with larger models.
-top_k_lg=5
-gpu_mem_limit_lg="$(python -c 'print(12 * (1024 ** 3))')"
+
 mkdir -p exp/conf
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
@@ -135,7 +135,7 @@ done
 # STEP 2.4: Optimize again, this time only with the important model parameters
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
-    sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
+    $optim_command \
       optim \
         --study-name model-${model_type}-lg-${feature_type} \
         "$db_url" \
@@ -174,7 +174,7 @@ done
 # STEP 2.6: run a random hyperparameter search for a while
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
-    sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
+    $optim_command \
       optim \
         --study-name train-${model_type}-sm-${feature_type} \
         "$db_url" \
@@ -186,8 +186,6 @@ done
 # STEP 2.7: the importance of hyperparameters from the train-*-sm-* searches
 # is too spread out among hyperparameters to go straight into train-*-lg-*.
 # Instead, we do a set of train-*-md-* on the top 10.
-top_k_md=10
-gpu_mem_limit_md="$(python -c 'print(9 * (1024 ** 3))')"
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
       cnn-mellin \
@@ -221,7 +219,7 @@ done
 # STEP 2.8
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
-    sbatch -p t4v1 --qos normal scripts/cnn_mellin.slrm \
+    $optim_command \
       optim \
         --study-name train-${model_type}-md-${feature_type} \
         "$db_url" \

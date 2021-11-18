@@ -5,23 +5,10 @@
 #SBATCH --mem=25G
 #SBATCH --export=ALL
 #SBATCH --output=exp/logs/slurm-%J.log
-#SBATCH --open-mode=append
 #SBATCH --gres=gpu:1
-#SBATCH --time=infinite
+#SBATCH --time=1:00:00
 
-model_dir=
-slurm_model_dir="/checkpoint/sdrobert/${SLURM_JOB_ID}"
-
-if [ -z "${SLURM_JOB_ID}" ]; then
-  log_file="exp/logs/cnn_mellin.$(date +%s).log"
-  echo "Looks like we aren't running slurm. Forking output to ${log_file}"
-  mkdir -p exp/logs
-  exec > >(tee "${log_file}") 2>&1
-else
-  model_dir="${slurm_model_dir}"
-fi
-
-echo "$0 called with arguments: $*"
+source scripts/preamble.slrm
 
 # first determine if we've got cnn-mellin installed
 if ! which cnn-mellin > /dev/null ; then
@@ -32,8 +19,8 @@ fi
 args=( "$@" )
 
 # set model flag if we have it
-if ! [[ "${args[*]}" =~ --model-dir ]] && ! [ -z "${model_dir}" ]; then
-  model_flag="--model-dir=${slurm_model_dir}"
+if ! [[ "${args[*]}" =~ --model-dir ]]; then
+  model_flag="--model-dir=${temp_dir}/models"
   echo "Could not find --model-dir flag. Adding '${model_flag}'"
   args+=( "$model_flag" )
 fi
