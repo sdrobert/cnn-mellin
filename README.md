@@ -7,10 +7,19 @@ This recipe can be ported to Windows relatively easily.
 ``` sh
 # environment variables used anywhere at all. Put up front for easy
 # manipulation
-db_uname=optuna
-db_server=localhost
-db_name=optim
-db_url=postgresql+pg8000://${db_uname}@${db_server}/${db_name}
+
+# database variables are probably server-specific.
+
+# postgresql
+# db_uname=optuna
+# db_server=localhost
+# db_name=optim
+# db_url=postgresql+pg8000://${db_uname}@${db_server}/${db_name}
+
+db_name=sdrobert_db1
+deft_file="$(cd ~; pwd -P)/.my.cnf"
+db_url="mysql+pymysql:///${db_name}?read_default_file=${deft_file}"
+
 model_types=( mcorr lcorr )
 # Only one representation is necessary for training a model and each
 # representation produces models that will not (in general) perform well on
@@ -28,8 +37,8 @@ top_k_md=10
 gpu_mem_limit_md="$(python -c 'print(9 * (1024 ** 3))')"
 top_k_lg=5
 gpu_mem_limit_lg="$(python -c 'print(12 * (1024 ** 3))')"
-optim_command="sbatch scripts/cnn_mellin.slrm"
-timit_prep_cmd="sbatch scripts/timit_prep.slrm"
+optim_command="sbatch --gres=gpu:t4:1 scripts/cnn_mellin.slrm"
+timit_prep_cmd="sbatch --gres=gpu:0 --time=03:00:00 scripts/timit_prep.slrm"
 timit_dir="$(cd ~/Databases/TIMIT; pwd -P)"
 
 mkdir -p exp/logs
@@ -54,13 +63,19 @@ backend, SQLite, deadlocks for parallel reads with the heartbeat. If you don't
 do parallel reads of the database file, you can probably go with SQLite.
 
 ``` python
-# setting up the database
 mkdir -p exp/logs
-initdb -D exp/${db_name}
-pg_ctl -D exp/${db_name} start
-createuser ${db_uname}
+
+# setting up the database 
+# postgresql
+# initdb -D exp/${db_name}
+# pg_ctl -D exp/${db_name} start
+# createuser ${db_uname}
 # dropdb ${db_name}  # clear existing results
-createdb --owner=${db_uname} ${db_name}
+# createdb --owner=${db_uname} ${db_name}
+
+# mysql
+mysql -u ${db_uname} -h ${db_server} -e "create database if not exists ${db_name}"
+mysql -u ${db_uname} -h ${db_server} -e "drop database ${db_name}"
 
 # STEP 2.1: create optuna experiments for small model selection.
 # We consider any combination of model parameters for about 30 epochs using an
@@ -87,6 +102,10 @@ done
 # STEP 2.2: run a random hyperparameter search for a while
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
+    if [[ "$(optuna trials --study-name model-${model_type}-sm-${feature_type} --storage $db_url -f yaml 2> /dev/null | grep -e 'state: COMPLETE' -e 'state: PRUNED' | wc -l)" -ge ${num_trials_sm} ]]; then
+      echo "Already done ${num_trials_sm} trials for model-${model_type}-sm-${feature_type}"
+      continue
+    fi
     $optim_command \
       optim \
         --study-name model-${model_type}-sm-${feature_type} \
@@ -135,6 +154,7 @@ done
 # STEP 2.4: Optimize again, this time only with the important model parameters
 for model_type in "${model_types[@]}"; do
   for feature_type in "${feature_types[@]}"; do
+    optuna
     $optim_command \
       optim \
         --study-name model-${model_type}-lg-${feature_type} \

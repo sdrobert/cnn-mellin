@@ -42,12 +42,18 @@ def init_study(
 
     device = torch.device(device)
     if device.type == "cuda":
-        avail_memory = torch.cuda.get_device_properties(device).total_memory
-        if avail_memory < mem_limit:
+        try:
+            avail_memory = torch.cuda.get_device_properties(device).total_memory
+            if avail_memory < mem_limit:
+                warnings.warn(
+                    f"The device {device} has {avail_memory / (1024 ** 3)} GB of memory "
+                    f"but the memory limit was set to {mem_limit / (1024 ** 3)} GB. "
+                    f"Consider decreasing the memory limit with --mem-limit-bytes"
+                )
+        except RuntimeError:
             warnings.warn(
-                f"The device {device} has {avail_memory / (1024 ** 3)} GB of memory "
-                f"but the memory limit was set to {mem_limit / (1024 ** 3)} GB. "
-                f"Consider decreasing the memory limit with --mem-limit-bytes"
+                f"The device {device} is unavailable. Unable to verify the amount of "
+                "memory on device"
             )
 
     train_dir = os.path.abspath(train_dir)
