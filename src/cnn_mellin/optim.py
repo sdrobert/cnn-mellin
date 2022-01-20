@@ -56,7 +56,11 @@ def init_study(
                 "memory on device"
             )
 
-    train_dir = os.path.abspath(train_dir)
+    # we use relpath so that the experiment will work from another machine with the
+    # same directory structure. To change this after the fact, you can use the Optuna
+    # CLI:
+    # $ optuna study set-user-attr -h
+    train_dir = os.path.relpath(train_dir)
     num_filts, num_classes = running.get_filts_and_classes(train_dir)
     raw = num_filts == 1
 
