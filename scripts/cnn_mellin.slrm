@@ -1,0 +1,49 @@
+#! /usr/bin/env bash
+#SBATCH --wait
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=25G
+#SBATCH --export=ALL
+#SBATCH --output=exp/logs/slurm-%J.log
+#SBATCH --gres=gpu:1
+
+source scripts/preamble.slrm
+
+# first determine if we've got cnn-mellin installed
+if ! which cnn-mellin > /dev/null ; then
+  echo -e "$0: cnn-mellin unavailable. Did you run 'pip install -e .'?"
+  exit 1
+fi
+
+args=( "$@" )
+
+# set model flag if we have it
+if ! [[ "${args[*]}" =~ --model-dir ]]; then
+  model_flag="--model-dir=${temp_dir}/models"
+  echo "Could not find --model-dir flag. Adding '${model_flag}'"
+  args+=( "$model_flag" )
+fi
+
+# set device flag if we have it
+if ! [[ "${args[*]}" =~ --device ]]; then
+  device_flag="--device=$( python -c 'import torch; print("cuda" if torch.cuda.is_available() else "cpu")')"
+  echo "Could not find --device flag. Adding '$device_flag'"
+  args=( "$device_flag" "${args[@]}" )
+fi
+if [[ "${args[*]}" =~ --device=cuda ]]; then
+  nvidia-smi
+fi
+
+# check if we have the mellin extension and fail out if we don't.
+# Comment this out if you want to use the pure python stuff.
+python -c 'import pydrobert.mellin.torch as t; assert t._ext_mcorr1d is not None, "mellin C extension is not available"' || exit 1
+
+# this loop is primarily for optim when an estimate caused an OOM exception.
+for x in $(seq 1 100); do
+  echo "Sleeping for 120 secs to wear out heartbeat"
+  sleep 120
+  echo "Calling (attempt $x/100)"
+  cnn-mellin "${args[@]}" && exit 0
+  echo -e "Call ended with error (attempt $x/100)"
+done

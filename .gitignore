@@ -107,11 +107,13 @@ venv.bak/
 # sdrobert: project-specific settings
 .ftpconfig
 .ftpignore
-steps/
-utils/
-local/
-cmd.sh
-.python_version
 data/
 exp/
+data
+exp
 conf/slurm.conf
+.gitversion
+.vscode
+version.py
+venv
+db_creds.sh

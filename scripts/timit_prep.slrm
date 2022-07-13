@@ -1,0 +1,42 @@
+#! /usr/bin/env bash
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=5G
+#SBATCH --export=ALL
+#SBATCH --output=exp/logs/slurm-%J.log
+#SBATCH --open-mode=append
+#SBATCH --time=03:00:00
+
+source scripts/preamble.slrm
+
+timit_dir="$1"
+shift
+feature_types=( "$@" )
+
+if [ ! -d "prep/conf" ]; then
+  echo "The folder prep doesn't look like it's been initialized. Call"
+  echo "  > git submodule update --init"
+  exit 1
+fi
+if [ ! -d "$timit_dir" ]; then
+  echo "'$timit_dir' is not a directory"
+  exit 1
+fi
+if [ -z "${feature_types[*]}" ]; then
+  echo "Feature types are empty!"
+  exit 1
+fi
+
+mkdir -p data/timit
+
+python prep/timit.py data/timit preamble "$timit_dir"
+python prep/timit.py data/timit init_phn --lm
+
+for feature_type in "${feature_types[@]}"; do
+  [ "$feature_type" != "raw" ] || continue
+  python prep/timit.py data/timit torch_dir phn48 $feature_type \
+    --computer-json conf/feats/$feature_type.json
+done
+[[ "${feature_types[*]}" =~ "raw" ]] && python prep/timit.py data/timit torch_dir phn48 raw --raw
+
