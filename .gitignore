@@ -116,3 +116,4 @@ conf/slurm.conf
 .vscode
 version.py
 venv
+db_creds.sh

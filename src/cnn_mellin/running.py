@@ -40,6 +40,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
     )
     dropout_prob = param.Magnitude(
         0.05,
+        softbounds=(0.0, 0.2),
         doc="The model dropout probability for all layers",
     )
     convolutional_dropout_2d = param.Boolean(

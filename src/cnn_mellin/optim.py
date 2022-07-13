@@ -3,6 +3,7 @@ from typing import Optional, Union
 import warnings
 import gc
 import tracemalloc
+import warnings
 
 from copy import deepcopy
 from shutil import rmtree
@@ -17,6 +18,9 @@ import cnn_mellin.models as models
 import sqlalchemy.engine.url
 
 from cnn_mellin import construct_default_param_dict, get_num_avail_cores
+
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def init_study(
@@ -207,23 +211,40 @@ def init_study(
     serialized = serialization.serialize_to_dict(param_dict)
     del ds
 
-    study = optuna.create_study(storage=str(out_url), study_name=study_name)
+    study = optuna.create_study(
+        storage=str(out_url), study_name=study_name, load_if_exists=True
+    )
+
+    def check_and_set(key, val, force=False):
+        if key in study.user_attrs and study.user_attrs[key] != val:
+            if force:
+                warnings.warn(
+                    f"User attribute {key} had value {study.user_attrs[key]}. "
+                    f"Setting to new value {val}"
+                )
+            else:
+                raise RuntimeError(
+                    f"Expected user attribute {key} to have value {val}, "
+                    f"got {study.user_attrs[key]}"
+                )
+        study.set_user_attr(key, val)
+
     if raw:
-        study.set_user_attr("raw", True)
-    study.set_user_attr("max_epochs", max_epochs)
-    study.set_user_attr("device", str(device))
-    study.set_user_attr("data_dir", train_dir)
-    study.set_user_attr("train_ids", train_ids)
-    study.set_user_attr("dev_ids", dev_ids)
-    study.set_user_attr("num_classes", num_classes)
-    study.set_user_attr("max_frames", max_frames)
-    study.set_user_attr("global_dict", serialized)
-    study.set_user_attr("num_filts", num_filts)
-    study.set_user_attr("mem_limit", mem_limit)
-    study.set_user_attr("only", sorted(only))
-    study.set_user_attr("num_data_workers", num_data_workers)
-    study.set_user_attr("num_trials", num_trials)
-    study.set_user_attr("pruner", pruner)
+        check_and_set("raw", True)
+    check_and_set("max_epochs", max_epochs)
+    check_and_set("device", str(device), True)
+    check_and_set("data_dir", train_dir, True)
+    check_and_set("train_ids", sorted(train_ids))
+    check_and_set("dev_ids", sorted(dev_ids))
+    check_and_set("num_classes", num_classes)
+    check_and_set("max_frames", max_frames)
+    check_and_set("global_dict", serialized)
+    check_and_set("num_filts", num_filts)
+    check_and_set("mem_limit", mem_limit)
+    check_and_set("only", sorted(only))
+    check_and_set("num_data_workers", num_data_workers)
+    check_and_set("num_trials", num_trials, True)
+    check_and_set("pruner", pruner)
     return study
 
 
@@ -307,13 +328,13 @@ def objective(trial: optuna.Trial, checkpoint_dir: Optional[str] = None) -> floa
     if num_trials is not None:
         num_active = sum(
             1
-            for t in trial.study.trials
-            if t.state
-            in {
-                optuna.trial.TrialState.COMPLETE,
-                optuna.trial.TrialState.PRUNED,
-                optuna.trial.TrialState.RUNNING,
-            }
+            for _ in trial.study.get_trials(
+                deepcopy=False,
+                states=(
+                    optuna.trial.TrialState.COMPLETE,
+                    optuna.trial.TrialState.RUNNING,
+                ),
+            )
         )
         if num_active >= num_trials:
             trial.study.stop()

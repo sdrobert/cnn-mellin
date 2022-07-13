@@ -441,17 +441,20 @@ def optim_run(options):
     if checkpoint_dir is None:
         checkpoint_dir_ = TemporaryDirectory()  # keep in scope
         checkpoint_dir = checkpoint_dir_.name
+    optim.optuna.storages.fail_stale_trials(study)
     num_complete = len(
         study.get_trials(
             False,
             states=(
                 optim.optuna.trial.TrialState.COMPLETE,
-                optim.optuna.trial.TrialState.PRUNED,
                 optim.optuna.trial.TrialState.RUNNING,
             ),
         )
     )
-    if num_complete >= study.user_attrs["num_trials"]:
+    if (
+        study.user_attrs["num_trials"] is not None
+        and num_complete >= study.user_attrs["num_trials"]
+    ):
         warnings.warn(
             f"Not starting. Done {num_complete}/{study.user_attrs['num_trials']} trials"
         )
@@ -460,7 +463,7 @@ def optim_run(options):
         study.user_attrs["num_trials"],
         states=(
             optim.optuna.trial.TrialState.COMPLETE,
-            optim.optuna.trial.TrialState.PRUNED,
+            # optim.optuna.trial.TrialState.PRUNED,
             optim.optuna.trial.TrialState.RUNNING,
         ),
     )
