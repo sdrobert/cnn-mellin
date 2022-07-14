@@ -1,0 +1,22 @@
+// Copyright 2018 Sean Robertson
+#pragma once
+
+#ifndef CDROBERT_MELLIN_CONFIG_CPU_HPP_
+#define CDROBERT_MELLIN_CONFIG_CPU_HPP_
+
+namespace cdrobert {
+namespace mellin {
+
+const int kMConv1DAlgorithmVersion = @MCONV1D_ALGORITHM_VERSION@;
+const int kMCorr1DAlgorithmVersion = @MCORR1D_ALGORITHM_VERSION@;
+const int kMConvLConvAlgorithmVersion = @MCONVLCONV_ALGORITHM_VERSION@;
+const int kMCorrLCorrAlgorithmVersion = @MCORRLCORR_ALGORITHM_VERSION@;
+const int kSnd2ColAlgorithmVersion = @SND2COL_ALGORITHM_VERSION@;
+const int kCol2SndAlgorithmVersion = @COL2SND_ALGORITHM_VERSION@;
+const int kSpec2ColAlgorithmVersion = @SPEC2COL_ALGORITHM_VERSION@;
+const int kCol2SpecAlgorithmVersion = @COL2SPEC_ALGORITHM_VERSION@;
+
+}  // mellin
+}  // cdrobert
+
+#endif  // CDROBERT_MELLIN_CONFIG_CPU_HPP_

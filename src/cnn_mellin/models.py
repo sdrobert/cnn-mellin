@@ -1,6 +1,5 @@
 """Acoustic models"""
 
-from pydrobert.mellin import lcorr_valid_size, mcorr_valid_size
 import warnings
 
 from itertools import chain
@@ -9,8 +8,7 @@ from typing import Tuple
 import param
 import torch
 
-from pydrobert.mellin.torch import MCorr1d, MCorrLCorr
-
+from cnn_mellin.mconv import lcorr_valid_size, mcorr_valid_size, MCorr1d, MCorrLCorr
 from cnn_mellin.layers import DilationLift, LogCompression
 
 __all__ = [

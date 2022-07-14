@@ -1,0 +1,23 @@
+#pragma once
+
+#ifndef CDROBERT_MELLIN_CONFIG_CUDA_H_
+#define CDROBERT_MELLIN_CONFIG_CUDA_H_
+
+namespace cdrobert {
+namespace mellin {
+
+const int kMConv1DCudaAlgorithmVersion = @MCONV1D_CUDA_ALGORITHM_VERSION@;
+const int kMCorr1DCudaAlgorithmVersion = @MCORR1D_CUDA_ALGORITHM_VERSION@;
+const int kMConvLConvCudaAlgorithmVersion = @MCONVLCONV_CUDA_ALGORITHM_VERSION@;
+const int kMCorrLCorrCudaAlgorithmVersion = @MCORRLCORR_CUDA_ALGORITHM_VERSION@;
+const int kSnd2ColCudaAlgorithmVersion = @SND2COL_CUDA_ALGORITHM_VERSION@;
+const int kCol2SndCudaAlgorithmVersion = @COL2SND_CUDA_ALGORITHM_VERSION@;
+const int kSpec2ColCudaAlgorithmVersion = @SPEC2COL_CUDA_ALGORITHM_VERSION@;
+const int kCol2SpecCudaAlgorithmVersion = @COL2SPEC_CUDA_ALGORITHM_VERSION@;
+const bool kCudaSerial = @MELLIN_CUDA_SERIAL@;
+const int kMaxCudaThreadsPerBlock = @MELLIN_MAX_CUDA_THREADS_PER_BLOCK@;
+
+}  // mellin
+}  // cdrobert
+
+#endif  // CDROBERT_MELLIN_CONFIG_CUDA_H_

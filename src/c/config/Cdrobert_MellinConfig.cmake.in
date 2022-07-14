@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+if (NOT TARGET Cdrobert::mellin)
+  include("${CMAKE_CURRENT_LIST_DIR}/Cdrobert_MellinTargets.cmake")
+endif()
+
+include(CMakeFindDependencyMacro)
+if (TARGET Cdrobert::mellin_cpu)
+  find_dependency(OpenMP)
+endif()
+
+check_required_components(Cdrobert_Mellin)

@@ -1,0 +1,19 @@
+// Copyright 2018 Sean Robertson
+#pragma once
+
+#ifndef CDROBERT_MELLIN_CONFIG_HPP_
+#define CDROBERT_MELLIN_CONFIG_HPP_
+
+namespace cdrobert {
+namespace mellin {
+
+constexpr char kVersionString[] = "@Mellin_VERSION@";
+const int kVersionMajor = @Mellin_VERSION_MAJOR@;
+const int kVersionMinor = @Mellin_VERSION_MINOR@;
+const int kVersionPatch = @Mellin_VERSION_PATCH@;
+const bool kUseCuda = @USE_CUDA@;
+
+}  // mellin
+}  // cdrobert
+
+#endif  // CDROBERT_MELLIN_CONFIG_HPP_

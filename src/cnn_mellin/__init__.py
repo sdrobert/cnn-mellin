@@ -11,6 +11,11 @@ __all__ = [
     "get_num_avail_cores",
 ]
 
+try:
+    from ._version import version as __version__  # type: ignore
+except ImportError:
+    __version__ = "inplace"
+
 
 def get_num_avail_cores() -> int:
     import os
