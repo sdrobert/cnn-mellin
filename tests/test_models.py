@@ -1,7 +1,7 @@
 import pytest
 import torch
-import cnn_mellin.models as models
 import numpy as np
+import models
 
 
 @pytest.mark.cpu

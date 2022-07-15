@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 
 from tempfile import mkdtemp
@@ -7,6 +8,8 @@ from zlib import adler32
 
 import pytest
 import torch
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 @pytest.fixture

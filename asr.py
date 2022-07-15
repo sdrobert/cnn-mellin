@@ -1,6 +1,5 @@
-"""Command line hooks for cnn_mellin"""
+#! /usr/bin/env python
 
-from logging import warn
 import os
 import argparse
 import warnings
@@ -11,18 +10,16 @@ from typing import Any, Optional, Sequence, Text, Union
 from tempfile import TemporaryDirectory
 
 import torch
-import cnn_mellin.models as models
-import cnn_mellin.running as running
-import pydrobert.torch.data as data
+import running
 import pydrobert.param.argparse as pargparse
 import pydrobert.param.optuna as poptuna
 import pydrobert.param.serialization as serialization
 
-from cnn_mellin import construct_default_param_dict, get_num_avail_cores
+from common import get_num_avail_cores, construct_default_param_dict
 
 try:
-    import cnn_mellin.optim as optim
-except ImportError:
+    import optim
+except ImportError as e:
     optim = None
 
 
@@ -532,3 +529,7 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
             optim_best(options)
         elif options.optim_command == "important":
             optim_important(options)
+
+
+if __name__ == "__main__":
+    sys.exit(cnn_mellin())

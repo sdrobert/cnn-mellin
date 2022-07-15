@@ -2,9 +2,9 @@ import os
 
 import pytest
 import torch
-import cnn_mellin.layers as layers
-import cnn_mellin.models as models
-import cnn_mellin.running as running
+import layers
+import models
+import running
 import pydrobert.torch.training as training
 import pydrobert.torch.data as data
 import numpy as np

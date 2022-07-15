@@ -3,7 +3,7 @@ import os
 import optuna
 import pytest
 import torch
-import cnn_mellin.command_line as command_line
+import asr as command_line
 from pydrobert.torch.command_line import get_torch_spect_data_dir_info
 
 

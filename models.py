@@ -8,8 +8,8 @@ from typing import Tuple
 import param
 import torch
 
-from cnn_mellin.mconv import lcorr_valid_size, mcorr_valid_size, MCorr1d, MCorrLCorr
-from cnn_mellin.layers import DilationLift, LogCompression
+from mconv import lcorr_valid_size, mcorr_valid_size, MCorr1d, MCorrLCorr
+from layers import DilationLift, LogCompression
 
 __all__ = [
     "AcousticModelParams",

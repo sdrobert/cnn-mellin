@@ -110,7 +110,7 @@ init_study () {
     fi
     local best_prior="$(get_best_prior $1 $2 $3)"
     [ -z "$best_prior" ] && return 1
-    local prior_cmd="cnn-mellin optim --study-name $best_prior $db_url best -"
+    local prior_cmd="scripts/cnn_mellin.srlm optim --study-name $best_prior $db_url best -"
   fi
   if [ "$sty" = "model" ]; then
     num_epochs=$(( $num_epochs - 10 ))
@@ -121,7 +121,7 @@ init_study () {
   if [ "$sz" = "sm" ]; then
     local select_args=( --blacklist "${blacklist[@]}" )
   else
-    cnn-mellin \
+    scripts/cnn_mellin.srlm \
       optim \
         --study-name ${sty}-${model_type}-${prev_sz}-${feature_type} \
         "$db_url" \
@@ -130,7 +130,7 @@ init_study () {
           exp/conf/${study_name}.params
     local select_args=( --whitelist $(cat exp/conf/${study_name}.params) )
   fi
-  cnn-mellin \
+  scripts/cnn_mellin.srlm \
     --read-ini exp/conf/${study_name}.ini \
     --device cuda \
     optim \

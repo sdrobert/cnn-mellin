@@ -3,15 +3,12 @@ import os
 import torch
 import pytest
 import optuna
-import param
 import pydrobert.param.optuna as poptuna
-import cnn_mellin.command_line as command_line
-import cnn_mellin.optim as optim
-import numpy as np
+import optim
 
 from pydrobert.torch.command_line import get_torch_spect_data_dir_info
 from pydrobert.param.serialization import deserialize_from_dict
-from cnn_mellin import construct_default_param_dict
+from common import construct_default_param_dict
 
 
 @pytest.mark.cpu

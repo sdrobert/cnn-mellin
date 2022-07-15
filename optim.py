@@ -13,11 +13,11 @@ import optuna
 import pydrobert.param.optuna as poptuna
 import pydrobert.param.serialization as serialization
 import pydrobert.torch.data as data
-import cnn_mellin.running as running
-import cnn_mellin.models as models
+import running
+import models
 import sqlalchemy.engine.url
 
-from cnn_mellin import construct_default_param_dict, get_num_avail_cores
+from common import get_num_avail_cores, construct_default_param_dict
 
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -281,7 +281,6 @@ def get_forward_backward_memory(
             torch.cuda.reset_peak_memory_stats(device)
         else:
             tracemalloc.clear_traces()
-            tracemalloc.reset_peak()
 
         model = models.AcousticModel(
             num_filts, num_classes + 1, param_dict["model"]

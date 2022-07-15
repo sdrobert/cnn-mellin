@@ -13,10 +13,10 @@ import pydrobert.torch.util as util
 import pydrobert.torch.layers as layers
 
 import pydrobert.torch.data as data
-import cnn_mellin.models as models
+import models
 
-from cnn_mellin import get_num_avail_cores
-from cnn_mellin.layers import ScaledGaussianNoise
+from common import get_num_avail_cores
+from layers import ScaledGaussianNoise
 from tqdm import tqdm
 
 
@@ -39,9 +39,7 @@ class MyTrainingStateParams(training.TrainingStateParams):
         doc="The proportion of gaussian noise per coefficient to add to the input",
     )
     dropout_prob = param.Magnitude(
-        0.05,
-        softbounds=(0.0, 0.2),
-        doc="The model dropout probability for all layers",
+        0.05, softbounds=(0.0, 0.2), doc="The model dropout probability for all layers",
     )
     convolutional_dropout_2d = param.Boolean(
         True, doc="If true, zero out channels instead of individual coefficients"
@@ -348,8 +346,7 @@ def ctc_greedy_search(
 
 
 def greedy_decode_am(
-    model: models.AcousticModel,
-    loader: data.SpectEvaluationDataLoader,
+    model: models.AcousticModel, loader: data.SpectEvaluationDataLoader,
 ) -> float:
     """Determine average error rate on eval set using greedy decoding
 

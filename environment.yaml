@@ -4,7 +4,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - cmake=3.23.2
   - optuna=2.10.0
+  - optuna-dashboard
   - pip
   - python=3.8
   - cudatoolkit=11.3.1
@@ -15,6 +17,7 @@ dependencies:
   - psycopg2
   - pytest
   - ninja
+  - setuptools_scm
   - pip:
     - pydrobert-param==0.3.0
     - "git+https://github.com/sdrobert/pydrobert-speech.git@fd0c48d9db0e4ff189f37d6f655dcac6070c70dd"

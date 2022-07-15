@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 try:
-    _cdir = os.path.join(os.path.dirname(__file__), "c")
+    _cdir = os.path.join(os.path.dirname(__file__), "ext")
     _idir = os.path.join(_cdir, "include")
     _csrc = [os.path.join(_cdir, x) for x in ("torch_cpu.cpp", "torch.cpp")]
     _icppsrc = [

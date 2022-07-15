@@ -5,8 +5,8 @@ import re
 
 import pytest
 import torch
+import mconv
 
-import cnn_mellin.mconv as mconv
 
 def _find_next_match(fp, matches):
     # consume the buffer until the next match and return a tuple of a string
@@ -102,18 +102,14 @@ _2D_ENTRIES = {
 
 _MCONV1D_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_mconv1d_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_mconv1d_buffers.h")
     ),
     _1D_ENTRIES,
 )
 
 _MCORR1D_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_mcorr1d_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_mcorr1d_buffers.h")
     ),
     _1D_ENTRIES,
 )
@@ -121,18 +117,14 @@ _MCORR1D_BUFFER_ENTRIES = _get_entries_from_test_file(
 
 _LCONV1D_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_lconv1d_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_lconv1d_buffers.h")
     ),
     _1D_ENTRIES,
 )
 
 _LCORR1D_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_lcorr1d_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_lcorr1d_buffers.h")
     ),
     _1D_ENTRIES,
 )
@@ -140,18 +132,14 @@ _LCORR1D_BUFFER_ENTRIES = _get_entries_from_test_file(
 
 _MCONVLCONV_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_mconvlconv_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_mconvlconv_buffers.h")
     ),
     _2D_ENTRIES,
 )
 
 _MCORRLCORR_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_mcorrlcorr_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_mcorrlcorr_buffers.h")
     ),
     _2D_ENTRIES,
 )
@@ -159,18 +147,14 @@ _MCORRLCORR_BUFFER_ENTRIES = _get_entries_from_test_file(
 
 _SND2COL_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_snd2col_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_snd2col_buffers.h")
     ),
     _1D_ENTRIES,
 )
 
 _COL2SND_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_col2snd_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_col2snd_buffers.h")
     ),
     _1D_ENTRIES,
 )
@@ -178,17 +162,13 @@ _COL2SND_BUFFER_ENTRIES = _get_entries_from_test_file(
 
 _LIN2COL_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_lin2col_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_lin2col_buffers.h")
     ),
     _1D_ENTRIES,
 )
 _COL2LIN_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_col2lin_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_col2lin_buffers.h")
     ),
     _1D_ENTRIES,
 )
@@ -196,17 +176,13 @@ _COL2LIN_BUFFER_ENTRIES = _get_entries_from_test_file(
 
 _SPEC2COL_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_spec2col_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_spec2col_buffers.h")
     ),
     _2D_ENTRIES,
 )
 _COL2SPEC_BUFFER_ENTRIES = _get_entries_from_test_file(
     os.path.abspath(
-        os.path.join(
-            __file__, "..", "..", "src", "c", "tests", "test_col2spec_buffers.h"
-        )
+        os.path.join(__file__, "..", "..", "c", "tests", "test_col2spec_buffers.h")
     ),
     _2D_ENTRIES,
 )
@@ -229,7 +205,7 @@ def _lcorr_nh(nf, ng, s, d, p, u):
 
 
 def _1d_buffers(idx, entries, nh_func):
-    f = torch.Tensor(entries["kF"][idx], dtype=torch.float) if "kF" in entries else None
+    f = torch.tensor(entries["kF"][idx], dtype=torch.float) if "kF" in entries else None
     g = torch.tensor(entries["kG"][idx], dtype=torch.float)
     h = torch.tensor(entries["kH"][idx], dtype=torch.float)
     nf = int(entries["kNF"][idx])
@@ -267,7 +243,11 @@ def _2d_buffers(idx, entries, nhx_func, nhy_func):
     uy = int(entries["kUY"][idx])
     nhx = nhx_func(nfx, ngx, sx, dx, px, ux)
     nhy = nhy_func(nfy, ngy, sy, dy, py, uy)
-    f = torch.empty((1, c_in, nfx, nfy)) if f is None else f.expand(c_out, c_in, nfx, nfy)
+    f = (
+        torch.empty((1, c_in, nfx, nfy))
+        if f is None
+        else f.expand(c_out, c_in, nfx, nfy)
+    )
     g = g.reshape(c_in, ngx, ngy)
     if c_out is None:
         h = h.reshape(c_in, nfx, nfy, nhx, nhy)
@@ -579,6 +559,7 @@ def spec2col(request):
     else:
         raise NotImplementedError
     return op
+
 
 def _add_bias(h):
     b = h.new(h.size()[1])
