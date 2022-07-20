@@ -12,6 +12,7 @@ if [ -z "$db_url" ]; then
   exit 1
 fi
 
+max_retries=10
 declare -A num_epochs_map=( [sm]=40 [md]=50 [lg]=60 )
 declare -A num_trials_map=( [sm]=256 [md]=128 [lg]=64 )
 declare -A top_k_map=( [md]=10 [lg]=5 )
@@ -142,9 +143,17 @@ run_study () {
     echo "Already done ${num_trials} trials for ${study_name}"
     return 0
   fi
-  python asr.py \
-    optim --study-name "${study_name}" "$db_url" run \
-    --sampler "$sampler"
+  for n in $(seq 1 $max_retries); do
+    # wear out heartbeat in case
+    echo "Sleeping 2min to wear out heartbeat"
+    sleep 120
+    echo "Attempt $n/$max_retries to optimize '${study_name}'"
+    python asr.py \
+      optim --study-name "${study_name}" "$db_url" run \
+      --sampler "$sampler" && echo "Run $n/$max_retries succeeded!" && break
+    echo "Run $n/$max_retries failed!"
+  done
+  return $?
 }
 
 if [ $stage -le 2 ]; then

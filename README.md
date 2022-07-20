@@ -14,41 +14,6 @@ quickly if the C++/CUDA on-the-fly extensions can be built. Merely set the
 of CUDA is necessary, change the version of `cudatoolkit` in
 `environment.yaml`.
 
-## Recipe
-
-``` sh
-# environment variables used anywhere at all. Put up front for easy
-# manipulation
-
-model_types=( mcorr lcorr )
-# Only one representation is necessary for training a model and each
-# representation produces models that will not (in general) perform well on
-# other representations.
-# - fbank-81-10ms:   80+1 Mel-scaled triangular overlapping filters (+energy)
-#                    computed with STFTs with a 25ms frame and 10ms frame shift
-# - sigbank-41-10ms: 40+1 Mel-scaled Gabor filters (+energy) computed with
-#                    short integration every 2ms
-# - raw:             Raw audio
-# All representations assume 16kHz samples.
-feature_types=( fbank-81-10ms sigbank-41-2ms )
-timit_prep_cmd="sbatch --gres=gpu:0 --time=03:00:00 scripts/timit_prep.slrm"
-timit_dir="$(cd ~/Databases/TIMIT; pwd -P)"
-
-mkdir -p exp/logs
-
-# Replicate the conda environment + install this
-conda env create -f environment.yaml
-conda activate cnn-mellin
-pip install .
-
-# STEP 1: timit feature/database prep. Consult the script for more info
-$timit_prep_cmd "$timit_dir" "${feature_types[@]}"
-
-# STEP 2 (optional): hyperparameter search. Consult script for more info
-scripts/hyperparam.sh
-```
-
-
 ## The Mellin C++/CUDA library
 
 The Mellin library is header-only, meaning it doesn't need compilation by
@@ -76,3 +41,53 @@ library is combined with the Torch wrapper files `ext/torch*` and compiled
 on-the-fly with
 [JIT](https://pytorch.org/tutorials/advanced/cpp_extension.html#jit-compiling-extensions)
 when available.
+
+## Azure
+
+Be careful that there aren't any extra files lying around in this directory
+or they'll end up getting copied over to the server each time a job is run.
+
+### TIMIT
+
+1. Perform initial setup of the [Azure ML
+   workspace](https://docs.microsoft.com/en-us/azure/machine-learning/quickstart-create-resources).
+   You'll also need to [install the
+   CLI](https://docs.microsoft.com/en-us/azure/machine-learning/how-to-configure-cli?tabs=public).
+   **Note** every CLI command (`az`) in each subsequent step should include
+   the subscription name, resource group, and workspace you've created:
+
+   ``` sh
+   az ml ... \
+      --subscription my-subscription-name \
+      --resource-group my-resource-group \
+      --workspace-name my-workspace-name \
+      ...
+   ```
+
+   we exclude them from below for brevity's sake.
+
+2. Set up the environment. Run
+
+   ``` sh
+   az ml environment create --file scripts/azure/create-environment.yaml
+   ```
+
+   This creates an environment with all the packages in `environment.yaml`.
+3. Set up the compute clusters. Run
+
+   ``` sh
+   az ml compute create --file scripts/azure/create-cluster-{cpu,gpu}.yaml
+   ```
+
+  This creates one dedicated, CPU-only cluster with a single node responsible
+  for doing the steps between any major work and a low-priority, GPU cluster
+  for doing the rest.
+4. (Optional) Double-check you've got the configuration working by running
+   pytest jobs. Run
+
+   ``` sh
+   az ml job create --file scripts/azure/run-pytest.yaml
+   ```
+
+5. Set up the unprocessed TIMIT dataset in Azure. TIMIT is licensed by the
+   LDC so we can't do this step automatically. 

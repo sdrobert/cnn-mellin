@@ -1,0 +1,17 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: pytest
+
+jobs:
+  cpu:
+    type: command
+    code: ../..
+    command: pytest -svm 'cpu and not python_ops'
+    compute: azureml:cnn-mellin-cpu
+    environment: azureml:cnn-mellin:1
+  gpu:
+    type: command
+    code: ../..
+    command: pytest -svm 'cpu and not python_ops'
+    compute: azureml:cnn-mellin-gpu
+    environment: azureml:cnn-mellin:1

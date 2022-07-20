@@ -1,0 +1,15 @@
+$schema: https://azuremlschemas.azureedge.net/latest/amlCompute.schema.json
+type: amlcompute
+#enter name for the compute
+name: cnn-mellin-gpu
+# The cheapest low-priority VM available. Low-priority means preemptible. Since
+# the recipe checkpoints by default this shouldn't be a problem, but you might
+# have to restart the instance on failure.
+size: Standard_NC6
+tier: low_priority
+min_instances: 0
+# You can decrease this to 1 if you don't plan on training more than one model
+# at once
+max_instances: 20
+# Should be >120 to avoid scaling down when sleeping for heartbeat
+idle_time_before_scale_down: 240

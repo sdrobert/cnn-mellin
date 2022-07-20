@@ -117,3 +117,4 @@ conf/slurm.conf
 _version.py
 venv
 db_creds.sh
+.tox
