@@ -156,7 +156,7 @@ run_study () {
   return $?
 }
 
-if [ $stage -le 2 ]; then
+if [ $stage -le 3 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       init_study $model $feat model-sm
@@ -165,7 +165,7 @@ if [ $stage -le 2 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 3 ]; then
+if [ $stage -le 4 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       run_study $model $feat model-sm
@@ -174,7 +174,7 @@ if [ $stage -le 3 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 4 ]; then
+if [ $stage -le 5 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       init_study $model $feat train-sm
@@ -183,7 +183,7 @@ if [ $stage -le 4 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 5 ]; then
+if [ $stage -le 6 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       run_study $model $feat train-sm
@@ -192,7 +192,7 @@ if [ $stage -le 5 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 6 ]; then
+if [ $stage -le 7 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       init_study $model $feat model-md
@@ -201,7 +201,7 @@ if [ $stage -le 6 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 7 ]; then
+if [ $stage -le 8 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       run_study $model $feat model-md
@@ -210,7 +210,7 @@ if [ $stage -le 7 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 8 ]; then
+if [ $stage -le 9 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       init_study $model $feat train-md
@@ -219,7 +219,7 @@ if [ $stage -le 8 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 9 ]; then
+if [ $stage -le 10 ]; then
   for model in "${models[@]}"; do
     for feat in "${feats[@]}"; do
       run_study $model $feat train-md

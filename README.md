@@ -65,18 +65,18 @@ or they'll end up getting copied over to the server each time a job is run.
    ```
 
    we exclude them from below for brevity's sake.
-
 2. Set up the environment. Run
 
    ``` sh
-   az ml environment create --file scripts/azure/create-environment.yaml
+   az ml environment create --file conf/azureml/create-environment.yaml
    ```
 
    This creates an environment with all the packages in `environment.yaml`.
 3. Set up the compute clusters. Run
 
    ``` sh
-   az ml compute create --file scripts/azure/create-cluster-{cpu,gpu}.yaml
+   az ml compute create --file conf/azureml/create-cluster-cpu.yaml
+   az ml compute create --file conf/azureml/create-cluster-gpu.yaml
    ```
 
   This creates one dedicated, CPU-only cluster with a single node responsible
@@ -86,8 +86,13 @@ or they'll end up getting copied over to the server each time a job is run.
    pytest jobs. Run
 
    ``` sh
-   az ml job create --file scripts/azure/run-pytest.yaml
+   az ml job create --file conf/azureml/run-pytest.yaml
    ```
 
-5. Set up the unprocessed TIMIT dataset in Azure. TIMIT is licensed by the
-   LDC so we can't do this step automatically. 
+5. Set up the TIMIT dataset. TIMIT is licensed by the LDC so we can't do this
+   step automatically.
+
+   ``` sh
+   az ml data create --name timit-ldc --type uri_folder --path /uri/to/timit
+   ```
+

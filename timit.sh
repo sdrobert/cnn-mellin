@@ -1,6 +1,31 @@
 #! /usr/bin/env bash
 
+# XXX(sdrobert): The awkward handling of foreach-loops allows for independent
+# parallelization over tasks via striding. If N processes in total need to
+# complete M independent tasks, then if process n is assigned tasks i according
+# to the for-loop
+# 
+#   for (i=n; i < M; i += N) { ... }
+# 
+# then all M tasks will be distributed roughly evenly over the N processes.
+# 
+# To perform only this work, a process can set environment variables prior
+# to running this script
+# 
+#   export TIMIT_OFFSET=n
+#   export TIMIT_STRIDE=N
+# 
+# We don't expose the offset and stride as flags to the user because the logic
+# of the script can break. This can happen when the process is allowed to
+# continue to the next stage as there's no guarantee that the work it just
+# finished is the only work it depends on. This script doesn't have
+# synchronization blocks, only early termination via the flag -x. The intended
+# synchronization method is therefore to run the script a stage at a time,
+# blocking between stages when necessary.
+
 set -e
+
+source scripts/utils.sh
 
 usage () {
   cat << EOF 1>&2
@@ -34,43 +59,6 @@ EOF
   exit ${1:-1}
 }
 
-argcheck_list() {
-  arg="$1"
-  cmd="$2"
-  read -ra a <<<"$3"
-  shift 3
-  for x in "${a[@]}"; do
-    $cmd $arg "$1" "$@"
-  done
-}
-
-argcheck_nat() {
-  if ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
-    echo "$0: '-$1' argument '$2' is not a natural number" 1>&2
-    usage
-  fi
-}
-
-argcheck_rdir() {
-  if ! [ -d "$2" ]; then
-    echo "$0: '-$1' argument '$2' is not a readable directory." 1>&2
-    usage
-  fi
-}
-
-argcheck_writable() {
-  if ! [ -w "$2" ]; then
-    echo "$0: '-$1' argument '$2' is not writable." 1>&2
-    usage
-  fi
-}
-
-argcheck_choices() {
-  if ! [[ " $3 " =~ " $2 " ]]; then
-    echo "$0: '-$1' argument '$2' not one of '$3'." 1>&2
-    usage
-  fi
-}
 
 check_config() {
   if [[ " ${INVALIDS[*]} " =~ " $1_$2 " ]] || \
@@ -78,6 +66,10 @@ check_config() {
      [[ " ${INVALIDS[*]} " =~ " $1_$3 " ]] ; then
     return 1
   fi
+  return 0
+}
+
+build_yaml() {
   mkdir -p "$confdir"
   yml="$confdir/$1_$2_$3.yaml"
   combine-yaml-files \
@@ -86,9 +78,15 @@ check_config() {
 }
 
 # constants
+#
+# XXX(sdrobert): do not use underscores in the names of parts of configurations
+# (feats, models, etcs). Underscores are used to join those parts into a name.
 ALL_FEATS=( fbank-81-10ms sigbank-41-2ms )
 ALL_MODELS=( lcorr mcorr )
+# invalids are regexes 
 INVALIDS=( )
+OFFSET="${TIMIT_OFFSET:-0}"
+STRIDE="${TIMIT_STRIDE:-1}"
 
 # variables
 stage=1
@@ -105,47 +103,9 @@ only=0
 do_hyperparam=0
 check_jit=1
 
-while getopts "qxhws:i:d:o:b:n:k:c:m:e:l:" opt; do
+
+while getopts "qxhws:k:i:d:o:b:n:c:f:m:" opt; do
   case $opt in
-    s)
-      argcheck_nat $opt "$OPTARG"
-      stage=$OPTARG
-      ;;
-    k)
-      argcheck_nat $opt "$OPTARG"
-      offset=$OPTARG
-      ;;
-    i)
-      argcheck_rdir $opt "$OPTARG"
-      timit="$OPTARG"
-      ;;
-    d)
-      argcheck_writable $opt "$OPTARG"
-      data="$OPTARG"
-      ;;
-    o)
-      argcheck_writable $opt "$OPTARG"
-      exp="$OPTARG"
-      ;;
-    b)
-      argcheck_list $opt argcheck_nat "$OPTARG"
-      beam_widths=( $OPTARG )
-      ;;
-    n)
-      argcheck_nat $opt "$OPTARG"
-      seeds=$OPTARG
-      ;;
-    c)
-      device="$OPTARG"
-      ;;
-    f)
-      argcheck_list $opt argcheck_choices "$OPTARG" "${ALL_FEATS[*]}"
-      feats=( $OPTARG )
-      ;;
-    m)
-      argcheck_list $opt argcheck_choices "$OPTARG" "${ALL_MODELS[*]}"
-      models=( $OPTARG )
-      ;;
     q)
       do_hyperparam=1
       ;;
@@ -158,6 +118,45 @@ while getopts "qxhws:i:d:o:b:n:k:c:m:e:l:" opt; do
     h)
       echo "Shell recipe to perform experiments on TIMIT." 1>&2
       usage 0
+      ;;
+    s)
+      argcheck_is_nat $opt "$OPTARG"
+      stage=$OPTARG
+      ;;
+    k)
+      argcheck_is_nat $opt "$OPTARG"
+      offset=$OPTARG
+      ;;
+    i)
+      argcheck_is_readable $opt "$OPTARG"
+      timit="$OPTARG"
+      ;;
+    d)
+      argcheck_is_writable $opt "$OPTARG"
+      data="$OPTARG"
+      ;;
+    o)
+      argcheck_is_writable $opt "$OPTARG"
+      exp="$OPTARG"
+      ;;
+    b)
+      argcheck_all_nat $opt "$OPTARG"
+      beam_widths=( $OPTARG )
+      ;;
+    n)
+      argcheck_is_nat $opt "$OPTARG"
+      seeds=$OPTARG
+      ;;
+    c)
+      device="$OPTARG"
+      ;;
+    f)
+      argcheck_all_a_choice $opt "${ALL_FEATS[@]}" "$OPTARG"
+      feats=( $OPTARG )
+      ;;
+    m)
+      argcheck_all_a_choice $opt "${ALL_MODELS[@]}" "$OPTARG"
+      models=( $OPTARG )
       ;;
   esac
 done
@@ -182,15 +181,20 @@ if [ $stage -le 1 ]; then
     python prep/timit.py "$data" init_phn --lm
     touch "$data/.complete"
   fi
-  for feat in "${feats[@]}"; do
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 2 ]; then
+  for (( i=$OFFSET; i < ${#feats[@]}; i += $STRIDE )); do
+    feat="${feats[$i]}"
     if [ ! -f "$data/$feat/.complete" ]; then 
       python prep/timit.py "$data" torch_dir phn48 "$feat" \
         --computer-json "conf/feats/$feat.json" \
         --seed 0
       touch "$data/$feat/.complete"
     fi
-    ((only)) && exit 0
   done
+  ((only)) && exit 0
 fi
 
 ((do_hyperparam)) && source scripts/hyperparam.sh
