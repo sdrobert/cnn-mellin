@@ -1,6 +1,10 @@
 # cnn-mellin
 
-## Installation
+## Running on a dedicated instance with Bash
+
+These instructions are applicable in the usual case where you have access to
+some dedicated machine (such as your PC or a cloud service you have to spin up
+or down). We also assume you can run a Bash script, which usually means Linux.
 
 To match the environment which this package was developed with, use the command
 
@@ -31,40 +35,62 @@ might not get the combination you're looking for. Try:
 conda search -c pytorch pytorch
 ```
 
-## The Mellin C++/CUDA library
-
-The Mellin library is header-only, meaning it doesn't need compilation by
-itself. The files already written in `ext` should suffice. However, if you wish
-to: a) test the C++ interface; b) change the default algorithm of the
-interface; or c) benchmark the various algorithms, you can use CMake to compile
-the project. We assume the conda environment has been created and `CUDA_HOME`
-set as above.
+Assuming the installation went well, running the TIMIT recipe from start to
+finish is straightforward:
 
 ``` sh
-CUDACXX="${CUDA_HOME}/bin/nvcc" \
-cmake -B build c -G Ninja \
-  "-DCMAKE_INSTALL_PREFIX=ext" \
-  "-DCUDAToolkit_ROOT=${CUDA_HOME}" \
-  "-DCMAKE_BUILD_TYPE=Release" \
-  "-DMELLIN_BUILD_CUDA=ON" \
-  "-DCMAKE_PROJECT_VERSION=$(python -c 'from setuptools_scm import get_version; print(get_version().split(".dev")[0])')" \
-  "-DMELLIN_SKIP_PERFORMANCE_BUILDS=OFF"
-cmake --build build --target install --config Release
+conda activate cnn-mellin
+./timit.sh -i /path/to/ldc/timit
 ```
 
-The above installs the library to `ext/{include,lib}`. For the purposes of the
-python scripts, the `lib` subdirectory can be safely deleted. The Mellin
-library is combined with the Torch wrapper files `ext/torch*` and compiled
-on-the-fly with
-[JIT](https://pytorch.org/tutorials/advanced/cpp_extension.html#jit-compiling-extensions)
-when available.
+Where `/path/to/ldc/timit` is the path which you downloaded
+[TIMIT](https://github.com/sdrobert/pytorch-database-prep/wiki/The-TIMIT-Corpus)
+to from the LDC. We can't do this for you because of its license/paywall. Once
+the recipe is completed, the script spits out descriptive statistics about the
+various experimental conditions' error rates. The script keeps track of what's
+been done so far, so you can kill/resume the script with little consequence.
 
-## Azure
+The two major downsides to this approach are: a) you must use Bash; and b) each
+trial (`feature type x model type x seed`) is run in serial, which can take a
+long time.
 
-Be careful that there aren't any extra files lying around in this directory or
-they'll end up getting copied over to the server each time a job is run.
+## Recipe details
 
-### TIMIT
+The script `timit.sh` wraps calls to `python prep/timit.py` and `python asr.py`
+with some additional glue to keep track of where everything is being saved, the
+stages completed, and the matrix of trial. It is loosely based off the `run.sh`
+script of [Kaldi
+recipes](https://github.com/kaldi-asr/kaldi/blob/master/egs/timit/s5/run.sh).
+Call
+
+``` sh
+./timit.sh -h
+```
+
+to list the options. Options like `-n`, `-k`, `-f`, and `-m` control which
+trials of the `feature x model x seed` matrix are run, avoiding spurious
+computation if you're not interested in descriptives or certain model
+combinations.
+
+Like Kaldi, the recipe is organized into a series of commands. Larger recipes
+such as
+[librispeech](https://github.com/kaldi-asr/kaldi/blob/master/egs/librispeech/s5/run.sh)
+organize blocks of commands into stages to allow for easy resumption (though
+you have to modify the value of the `stage` variable inside `run.sh` manually
+to do so). `timit.sh` exposes that functionality via the option `-s`. For
+example,
+
+``` sh
+./timit.sh -s 4
+```
+
+runs the recipe from stage 4.
+
+## Running via a scheduling system
+
+### Slurm
+
+### Azure ML
 
 1. Perform initial setup of the [Azure ML
    workspace](https://docs.microsoft.com/en-us/azure/machine-learning/quickstart-create-resources).
@@ -113,3 +139,40 @@ they'll end up getting copied over to the server each time a job is run.
    az ml data create --name timit-ldc --type uri_folder --path /uri/to/timit
    ```
 
+## Miscellaneous
+
+### The Mellin C++/CUDA library
+
+The Mellin library is header-only, meaning it doesn't need compilation by
+itself. The files already written in `ext` should suffice. However, if you wish
+to: a) test the C++ interface; b) change the default algorithm of the
+interface; or c) benchmark the various algorithms, you can use CMake to compile
+the project. We assume the conda environment has been created and `CUDA_HOME`
+set as above.
+
+``` sh
+CUDACXX="${CUDA_HOME}/bin/nvcc" \
+cmake -B build c -G Ninja \
+  "-DCMAKE_INSTALL_PREFIX=ext" \
+  "-DCUDAToolkit_ROOT=${CUDA_HOME}" \
+  "-DCMAKE_BUILD_TYPE=Release" \
+  "-DMELLIN_BUILD_CUDA=ON" \
+  "-DCMAKE_PROJECT_VERSION=$(python -c 'from setuptools_scm import get_version; print(get_version().split(".dev")[0])')" \
+  "-DMELLIN_SKIP_PERFORMANCE_BUILDS=OFF"
+cmake --build build --target install --config Release
+```
+
+The above installs the library to `ext/{include,lib}`. For the purposes of the
+python scripts, the `lib` subdirectory can be safely deleted. The Mellin
+library is combined with the Torch wrapper files `ext/torch*` and compiled
+on-the-fly with
+[JIT](https://pytorch.org/tutorials/advanced/cpp_extension.html#jit-compiling-extensions)
+when available.
+
+### Hyperparameter search
+
+TODO
+
+## License
+
+Apache 2.0
