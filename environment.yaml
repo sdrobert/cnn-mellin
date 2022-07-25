@@ -2,15 +2,14 @@ name: cnn-mellin
 channels:
   - pytorch
   - conda-forge
-  - defaults
 dependencies:
   - cmake=3.23.2
   - optuna=2.10.0
   - optuna-dashboard
   - pip
   - python=3.8
-  - cudatoolkit=11.1.1
-  - pytorch=1.10.2
+  - cudatoolkit=11.3.*
+  - pytorch=1.10.*
   - tqdm
   - scikit-learn
   - postgresql

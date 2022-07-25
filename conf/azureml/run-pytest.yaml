@@ -8,10 +8,10 @@ jobs:
     code: ../..
     command: pytest -svm 'cpu and not python_ops'
     compute: azureml:cnn-mellin-cpu
-    environment: azureml:cnn-mellin:1
+    environment: azureml:cnn-mellin@latest
   gpu:
     type: command
     code: ../..
     command: pytest -svm 'cpu and not python_ops'
     compute: azureml:cnn-mellin-gpu
-    environment: azureml:cnn-mellin:1
+    environment: azureml:cnn-mellin@latest

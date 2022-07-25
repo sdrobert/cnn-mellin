@@ -5,23 +5,40 @@
 To match the environment which this package was developed with, use the command
 
 ``` sh
-conda env create -f environment.yaml
+CONDA_OVERRIDE_CUDA=11.3 conda env create -f environment.yaml
 ```
 
-Though no further steps are necessary to run the code, the code will run more
-quickly if the C++/CUDA on-the-fly extensions can be built. Merely set the
-`CUDA_HOME` environment variable to that of CUDA v11.3. If a different version
-of CUDA is necessary, change the version of `cudatoolkit` in
-`environment.yaml`.
+Though no further steps are necessary to run the code, the code will run *much*
+more quickly if the C++/CUDA on-the-fly extensions can be built. Merely set the
+`CUDA_HOME` environment variable to tell PyTorch where to look, e.g.
+
+``` sh
+export CUDA_HOME="$(cd "$(which nvcc)/../.."; pwd -P)"
+```
+
+Instructions for how to install the toolkit on Linux can be found
+[here](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html).
+You'll want to install the 11.3 toolkit.
+
+If your CUDA driver doesn't support version 11.3, you want to use a later
+version, or whatever, you'll have to modify two things at least. First, you'll
+have to change the version of `cudatoolkit` in the `environment.yaml` file.
+Second, set the `CONDA_OVERRIDE_CUDA` flag to the appropriate (minor) version.
+Note that PyTorch is only compiled for some CUDA versions per release; you
+might not get the combination you're looking for. Try:
+
+``` sh
+conda search -c pytorch pytorch
+```
 
 ## The Mellin C++/CUDA library
 
 The Mellin library is header-only, meaning it doesn't need compilation by
-itself. The files already written in `ext` should suffice.
-However, if you wish to: a) test the C++ interface; b) change the default
-algorithm of the interface; or c) benchmark the various algorithms, you can use
-CMake to compile the project. We assume the conda environment has been created
-and `CUDA_HOME` set as above.
+itself. The files already written in `ext` should suffice. However, if you wish
+to: a) test the C++ interface; b) change the default algorithm of the
+interface; or c) benchmark the various algorithms, you can use CMake to compile
+the project. We assume the conda environment has been created and `CUDA_HOME`
+set as above.
 
 ``` sh
 CUDACXX="${CUDA_HOME}/bin/nvcc" \
@@ -44,8 +61,8 @@ when available.
 
 ## Azure
 
-Be careful that there aren't any extra files lying around in this directory
-or they'll end up getting copied over to the server each time a job is run.
+Be careful that there aren't any extra files lying around in this directory or
+they'll end up getting copied over to the server each time a job is run.
 
 ### TIMIT
 

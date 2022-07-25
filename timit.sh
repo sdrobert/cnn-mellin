@@ -179,7 +179,7 @@ if [ $stage -le 1 ]; then
     fi
     python prep/timit.py "$data" preamble "$timit"
     python prep/timit.py "$data" init_phn --lm
-    touch "$data/.complete"
+    touch "$data/local/.complete"
   fi
   ((only)) && exit 0
 fi

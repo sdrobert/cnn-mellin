@@ -4,6 +4,10 @@ if [ -z "$stage" ]; then
   exit 1
 fi
 
+opt="$exp/optim"
+ckpt="${TIMIT_CKPT_DIR:-"$opt/ckpts"}"
+mkdir -p "$opt/"{conf,completed_stages} "$ckpt"
+
 [ -f ./db_creds.sh ] && source db_creds.sh
 if [ -z "$db_url" ]; then
   echo \
@@ -25,7 +29,6 @@ declare -A gpu_mem_limit_map=( \
   [lg]="$(python -c 'print(12 * (1024 ** 3))')" \
 )
 
-mkdir -p exp/{logs,conf}
 
 is_complete () {
   [[ "$(optuna trials --study-name $1 --storage $db_url -f yaml 2> /dev/null | grep -e 'state: COMPLETE' | wc -l)" -ge "$2" ]]
@@ -103,7 +106,7 @@ init_study () {
   fi
   $prior_cmd | \
     sed 's/\(max_.*_mask\)[ ]*=.*/\1 = 10000/g;s/num_epochs[ ]*=.*/num_epochs = '"${num_epochs}"'/g' \
-    > exp/conf/${study_name}.ini
+    > "$opt/conf/${study_name}.ini"
   if [ "$sz" = "sm" ]; then
     local select_args=( --blacklist "${blacklist[@]}" )
   else
@@ -113,17 +116,17 @@ init_study () {
         "$db_url" \
         important \
           --top-k=${top_k} \
-          exp/conf/${study_name}.params
-    local select_args=( --whitelist $(cat exp/conf/${study_name}.params) )
+          "$opt/conf/${study_name}.params"
+    local select_args=( --whitelist $(cat "$opt/conf/${study_name}.params") )
   fi
   python asr.py \
-    --read-ini exp/conf/${study_name}.ini \
-    --device cuda \
+    --read-ini "$opt/conf/${study_name}.ini" \
+    --device $device \
     optim \
       --study-name ${study_name} \
       "$db_url" \
       init \
-        data/timit/${feat}/train \
+        "$data/$feat/train" \
         ${select_args[@]} \
         --num-data-workers 4 \
         --num-trials ${num_trials} \
@@ -149,6 +152,7 @@ run_study () {
     sleep 120
     echo "Attempt $n/$max_retries to optimize '${study_name}'"
     python asr.py \
+      --model-dir "$ckpt" \
       optim --study-name "${study_name}" "$db_url" run \
       --sampler "$sampler" && echo "Run $n/$max_retries succeeded!" && break
     echo "Run $n/$max_retries failed!"
@@ -157,73 +161,145 @@ run_study () {
 }
 
 if [ $stage -le 3 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
+  if [ ! -f "$opt/completed_stages/03" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
       init_study $model $feat model-sm
+      done
     done
-  done
+  fi
+  touch "$opt/completed_stages/03"
   ((only)) && exit 0
 fi
 
 if [ $stage -le 4 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      run_study $model $feat model-sm
+  if [ ! -f "$opt/completed_stages/04" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        run_study $model $feat model-sm
+      done
     done
-  done
+  fi
+  touch "$opt/completed_stages/04"
   ((only)) && exit 0
 fi
 
 if [ $stage -le 5 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      init_study $model $feat train-sm
+  if [ ! -f "$opt/completed_stages/05" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        init_study $model $feat train-sm
+      done
     done
-  done
+    touch "$opt/completed_stages/05"
+  fi
   ((only)) && exit 0
 fi
 
 if [ $stage -le 6 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      run_study $model $feat train-sm
+  if [ ! -f "$opt/completed_stages/06" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        run_study $model $feat train-sm
+      done
     done
-  done
+    touch "$opt/completed_stages/06"
+  fi
   ((only)) && exit 0
 fi
 
 if [ $stage -le 7 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      init_study $model $feat model-md
+  if [ ! -f "$opt/completed_stages/07" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        init_study $model $feat model-md
+      done
     done
-  done
+    touch "$opt/completed_stages/07"
+  fi
   ((only)) && exit 0
 fi
 
 if [ $stage -le 8 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      run_study $model $feat model-md
+  if [ ! -f "$opt/completed_stages/08" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        run_study $model $feat model-md
+      done
     done
-  done
+    touch "$opt/completed_stages/08"
+  fi
   ((only)) && exit 0
 fi
 
 if [ $stage -le 9 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      init_study $model $feat train-md
+  if [ ! -f "$opt/completed_stages/09" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        init_study $model $feat train-md
+      done
     done
-  done
+    touch "$opt/completed_stages/09"
+  fi
   ((only)) && exit 0
 fi
 
 if [ $stage -le 10 ]; then
-  for model in "${models[@]}"; do
-    for feat in "${feats[@]}"; do
-      run_study $model $feat train-md
+  if [ ! -f "$opt/completed_stages/10" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        run_study $model $feat train-md
+      done
     done
-  done
+    touch "$opt/completed_stages/10"
+  fi
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 11 ]; then
+  if [ ! -f "$opt/completed_stages/11" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+      init_study $model $feat model-lg
+      done
+    done
+    touch "$opt/completed_stages/11"
+  fi
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 12 ]; then
+  if [ ! -f "$opt/completed_stages/12" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        run_study $model $feat model-lg
+      done
+    done
+    touch "$opt/completed_stages/12"
+  fi
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 13 ]; then
+  if [ ! -f "$opt/completed_stages/13" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        init_study $model $feat train-lg
+      done
+    done
+    touch "$opt/completed_stages/13"
+  fi
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 14 ]; then
+  if [ ! -f "$opt/completed_stages/14" ]; then
+    for model in "${models[@]}"; do
+      for feat in "${feats[@]}"; do
+        run_study $model $feat train-lg
+      done
+    done
+    touch "$opt/completed_stages/14"
+  fi
   ((only)) && exit 0
 fi

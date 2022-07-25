@@ -98,8 +98,9 @@ filter() {
 # argcheck functions
 
 _argcheck_is() {
-  if ! "${@:2}"; then
-    echo "$0: argparse -$2 value '${!#}' $1" 1>&2
+  local cmd="${!#}"
+  if ! "$cmd" "${@:3:$#-3}"; then
+    echo "$0: argparse -$2 value '${@:$#-1:1}' $1" 1>&2
     declare -F "usage" > /dev/null && usage
     exit 1
   fi
@@ -135,4 +136,3 @@ argcheck_all_readable() { _argcheck_all "is not readable" "$@" is_readable; }
 argcheck_all_file() { _argcheck_all "is not a file" "$@" is_file; }
 argcheck_all_a_choice() { _argcheck_all "is not in choices '${*:2:$#-2}'" "$@" is_a_choice; }
 argcheck_all_a_match() { _argcheck_all "does not match any of '${*:2:$#-2}'" "$@" is_a_match; }
-
