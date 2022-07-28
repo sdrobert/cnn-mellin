@@ -1,0 +1,18 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+display_name: timit-stages-1-and-2
+code: ../..
+command: |
+  bash ./scripts/azureml/timit_wrapper.sh -s 1 -i ${{inputs.timit_ldc}} -x -d ${{outputs.timit_data}} -w || exit 1;
+  bash ./scripts/azureml/timit_wrapper.sh -s 2 -x -d ${{outputs.timit_data}} -w
+environment: azureml:cnn-mellin@latest
+compute: azureml:cnn-mellin-cpu
+inputs:
+  timit_ldc:
+    type: uri_folder
+    mode: ro_mount
+    path: azureml:timit-ldc@latest
+outputs:
+  timit_data:
+    type: uri_folder
+    mode: rw_mount
+    path: azureml://datastores/workspaceblobstore/paths/data/timit

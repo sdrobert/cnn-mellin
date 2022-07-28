@@ -89,7 +89,7 @@ OFFSET="${TIMIT_OFFSET:-0}"
 STRIDE="${TIMIT_STRIDE:-1}"
 
 # variables
-stage=1
+stage=0
 timit=
 data=data/timit
 exp=exp/timit
@@ -102,7 +102,6 @@ beam_widths=( 1 2 4 8 16 32 )
 only=0
 do_hyperparam=0
 check_jit=1
-
 
 while getopts "qxhws:k:i:d:o:b:n:c:f:m:" opt; do
   case $opt in
@@ -132,11 +131,12 @@ while getopts "qxhws:k:i:d:o:b:n:c:f:m:" opt; do
       timit="$OPTARG"
       ;;
     d)
-      argcheck_is_writable $opt "$OPTARG"
+      # we check permissions for the -d and -o directories when we actually
+      # need them. This is largely for Azure, which will only mount these
+      # with appropriate permissions and when necessary.
       data="$OPTARG"
       ;;
     o)
-      argcheck_is_writable $opt "$OPTARG"
       exp="$OPTARG"
       ;;
     b)
@@ -170,34 +170,69 @@ if ((check_jit)); then
   python -c 'import warnings; warnings.simplefilter("error"); import mconv'
 fi
 
+if ((only)) && [ $stage = 0 ]; then
+  echo "The -x flag must be paired with the -s flag" 1>&2
+  exit 1
+fi
+
 # prep the dataset
 if [ $stage -le 1 ]; then
-  if [ ! -f "$data/.complete" ]; then
+  if [ ! -f "$data/local/.complete" ]; then
+    echo "Beginning stage 1"
     if [ -z "$timit" ]; then
       echo "timit directory unset, but needed for this command (use -i)" 1>&2
       exit 1
     fi
+    argcheck_is_writable d "$data"
+    argcheck_is_readable i "$timit"
     python prep/timit.py "$data" preamble "$timit"
     python prep/timit.py "$data" init_phn --lm
     touch "$data/local/.complete"
+    echo "Finished stage 1"
+  else
+    echo "$data/.complete exists already. Skipping stage 1."
   fi
   ((only)) && exit 0
 fi
 
+
 if [ $stage -le 2 ]; then
   for (( i=$OFFSET; i < ${#feats[@]}; i += $STRIDE )); do
     feat="${feats[$i]}"
-    if [ ! -f "$data/$feat/.complete" ]; then 
+    if [ ! -f "$data/$feat/.complete" ]; then
+      argcheck_is_rw d "$data"
+      echo "Beginning stage 2 with feats $feat"
       python prep/timit.py "$data" torch_dir phn48 "$feat" \
         --computer-json "conf/feats/$feat.json" \
         --seed 0
       touch "$data/$feat/.complete"
+      echo "Finished stage 2 with feats $feat"
+    else
+      echo \
+        "$data/$feat/.complete already exists." \
+        "Skipping stage 2 with feats $feat"
     fi
   done
   ((only)) && exit 0
 fi
 
-((do_hyperparam)) && source scripts/hyperparam.sh
+argcheck_is_readable d "$data"
+mkdir -p "$exp" 2> /dev/null
+argcheck_is_rw o "$exp"
+
+if ((do_hyperparam)); then
+  source scripts/hyperparam.sh
+elif [ "$stage" -le 14 ]; then
+  echo \
+    "Skipping hyperparameter stages $stage to 14. If you wanted to do" \
+    "these, rerun with the -q flag."
+fi
+
+if ((only)); then
+  echo "Stage $stage does not exist. The -x flag must be paired " \
+    "with an existing stage" 1>&2
+  exit 1
+fi
 
 for model in "${models[@]}"; do
   for feat in "${feats[@]}"; do

@@ -24,6 +24,9 @@ is_writable() [[ -w "$1" ]]
 # is the argument readable?
 is_readable() [[ -r "$1" ]]
 
+# is the argument readable and writable?
+is_rw() [[ -r "$1" && -w "$1" ]]
+
 # is the argument a file?
 is_file() [[ -f "$1" ]]
 
@@ -111,6 +114,7 @@ argcheck_is_nat() { _argcheck_is "is not natural" "$@" is_nat; }
 argcheck_is_dir() { _argcheck_is "is not a directory" "$@" is_dir; }
 argcheck_is_writable() { _argcheck_is "is not writable" "$@" is_writable; }
 argcheck_is_readable() { _argcheck_is "is not readable" "$@" is_readable; }
+argcheck_is_rw() { _argcheck_is "is either not readable or not writable" "$@" is_rw; }
 argcheck_is_file() { _argcheck_is "is not a file" "$@" is_file; }
 argcheck_is_a_choice() { _argcheck_is "is not in choices '${*:2:$#-2}'" "$@" is_a_choice; }
 argcheck_is_a_match() { _argcheck_is "does not match any of '${*:2:$#-2}'" "$@" is_a_match; }

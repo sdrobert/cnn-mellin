@@ -118,3 +118,4 @@ _version.py
 venv
 db_creds.sh
 .tox
+.azureml

@@ -12,4 +12,4 @@ min_instances: 0
 # at once
 max_instances: 20
 # Should be >120 to avoid scaling down when sleeping for heartbeat
-idle_time_before_scale_down: 240
+idle_time_before_scale_down: 1800
