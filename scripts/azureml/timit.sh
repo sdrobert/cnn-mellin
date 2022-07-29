@@ -3,16 +3,17 @@
 set -e
 
 timit_dir="${1:-"~/Databases/TIMIT"}"
-ws=cnn-mellin
+ws=cnn-mellin  # workspace name
 env_type=dev  # core or dev
-ncpu=1
-ngpu=20
-run_tests=0
-do_hyperparam=1
+ncpu=1  # maximum number of CPU nodes in the GPU cluster
+ngpu=20  # maximum number of GPU nodes in the GPU cluster
+do_hyperparam=1  # do hyperparameter search (optional, requires dev)
 
 run_stage() {
-  local set_string="--set inputs.stage=$1 display_name=timit-stage-$s"
+  local stage="$(printf "%02d" "$1")"
+  [ -f "exp/timit/completed_stages/$stage" ] && return
   shift
+  local set_string="--set inputs.stage=$stage display_name=timit-stage-$stage"
   while [ $# -gt 0 ]; do
     case "$1" in
       -n)
@@ -25,25 +26,24 @@ run_stage() {
     esac
   done
   az ml job create -w $ws -f scripts/azureml/timit-stage-n.yaml --stream $set_string
+  touch "exp/timit/completed_stages/$stage"
 }
 
-# az ml workspace create -n $ws
-# az ml environment create -w $ws -f scripts/azureml/create-environment-$env_type.yaml
-# az ml compute create -w $ws -f scripts/azureml/create-cluster-cpu.yaml --set max_instances=$ncpu
-# az ml compute create -w $ws -f scripts/azureml/create-cluster-gpu.yaml --set max_instances=$ngpu
+mkdir -p exp/timit/completed_stages
 
-if ((run_tests)); then
-  # test the cluster, if desired
-  if [ $env_type != "dev" ]; then
-    echo "env_type must be 'dev' to run tests" 1>&2
-    exit 1
-  fi
-  az ml job create -w $ws -f scripts/azureml/run-pytest.yaml --stream
+if [ ! -f "exp/timit/completed_stages/00" ]; then
+  az ml workspace create -n $ws
+  az ml environment create -w $ws -f scripts/azureml/create-environment-$env_type.yaml
+  az ml compute create -w $ws -f scripts/azureml/create-cluster-cpu.yaml --set max_instances=$ncpu
+  az ml compute create -w $ws -f scripts/azureml/create-cluster-gpu.yaml --set max_instances=$ngpu
+  az ml data create -w $ws -n timit-ldc --type uri_folder --path "$timit_dir"
+  touch exp/timit/completed_stages/00
 fi
 
-# az ml data create -w $ws -n timit-ldc --type uri_folder --path "$timit_dir"
-
-# az ml job create -w $ws -f scripts/azureml/timit-stages-1-and-2.yaml --stream
+if [ ! -f "exp/timit/completed_stages/01_02" ]; then
+  az ml job create -w $ws -f scripts/azureml/timit-stages-1-and-2.yaml --stream
+  touch/exp/timit/completed_stages/01_02
+fi
 
 if ((do_hyperparam)); then
 

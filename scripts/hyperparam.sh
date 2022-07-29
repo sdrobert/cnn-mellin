@@ -162,7 +162,7 @@ run_study () {
 
 for s in {03..14}; do
   if [ $stage -le $s ]; then
-    if [ ! -f "$opt/completed_stages/$s" ]; then
+    if [ ! -f "$exp/completed_stages/$s" ]; then
       echo "Beginning stage $s"
       ss=$((10#$s - 3))
       ((ss % 2)) && cmd=run_study || cmd=init_study
@@ -181,10 +181,10 @@ for s in {03..14}; do
           $cmd $model $feat $m_or_t-$sz
         done
       done
-      touch "$opt/completed_stages/$s"
+      touch "$exp/completed_stages/$s"
       echo "Finished stage $s"
     else
-      echo "'$opt/completed_stages/$s' exists. Skipping stage $s"
+      echo "'$exp/completed_stages/$s' exists. Skipping stage $s"
     fi
     ((only)) && exit 0
   fi

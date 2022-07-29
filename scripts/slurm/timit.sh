@@ -3,9 +3,9 @@
 mkdir -p logs/timit
 
 export CUDA_HOME=/pkgs/cuda-11.3
-timit_dir=~/Databases/TIMIT
-cpu_opts="-p cpu --gres=gpu:0"
-gpu_opts="-p p100 --gres=gpu:1"
+timit_dir="${1:"~/Databases/TIMIT"}"
+cpu_opts="${2:-"-p cpu"}"
+gpu_opts="${3:-"-p p100"}"
 do_hyperparam=1
 
 set -e
@@ -24,14 +24,13 @@ if ((do_hyperparam)); then
   # XXX(sdrobert): the even-numbered stages are the actual hyperparameter
   # searches. We assign them an infinite time allotment by default as it's
   # unclear how long they'll take. You can safely decrease these allotments to
-  # a few hours and, whenever the job is killed, simply restart it. Note that
-  # doing so 
+  # a few hours and, whenever the job is killed, simply restart it.
   for s in {3..13..2}; do
     Sa="$(printf "%02d\n" $s)"
     Sb="$(printf "%02d\n" $((s + 1)))"
-    [ ! -f "exp/timit/optim/completed_stages/$Sa" ] && \
+    [ ! -f "exp/timit/completed_stages/$Sa" ] && \
       sbatch $cpu_opts -c 1 -W scripts/slurm/timit_wrapper.sh -s $s
-    [ ! -f "exp/timit/optim/completed_stages/$Sb" ] && \
-      sbatch $gpu_opts -c 4 -a 1-20 -W scripts/slurm/timit_wrapper.sh -s $s
+    [ ! -f "exp/timit/completed_stages/$Sb" ] && \
+      sbatch $gpu_opts -c 4 -a 1-20 -W --gres=gpu:1 scripts/slurm/timit_wrapper.sh -s $s
   done
 fi

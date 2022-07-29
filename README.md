@@ -107,15 +107,47 @@ without errors
 
 ## Running via a scheduling system
 
+The `timit.sh` recipe was designed so that the user may run a single stage and
+exit. This is convenient for job schedulers like
+[Slurm](https://slurm.schedmd.com/documentation.html) or [Azure Machine
+Learning](https://azure.microsoft.com/en-ca/services/machine-learning/), both
+of which run tasks on a remote instance with a pre-defined environment
+asynchronously. The idea is to write a script which runs on a dedicated
+instance that tells the scheduler to run a step, waits for the step to finish,
+and then moves on to the next. Parallelization occurs within-stage accross the
+configuration matrix. Consult the start of `./timit.sh` for more info on how
+this is done.
+
 ### Slurm
+
+1. Set up the Conda environment as above.
+2. Run the script
+
+   ``` sh
+   ./scripts/slurm/timit.sh /path/to/ldc/timit \
+      'sbatch options for cpu tasks' \
+      'sbatch options for gpu tasks'
+   ```
+
+   where options include things like setting the partition, QOS, and a
+   maximum time if necesary. Consult `man sbatch` for more info. Do not muck
+   with the options for parallelization such as `--array` or `--num-tasks`
+   as those are handled by the script. Also, `--gres=gpu:1` is automatically
+   added for gpu tasks.
 
 ### Azure ML
 
 1. Create an Azure account and a resource group you want to perform experiments
-   in. By default the recipe uses 100 low-priority NC-series cores and only
-   4 dedicated CPU cores. You might have to request quota increases.
+   in. By default the recipe uses 120 low-priority NC-series cores and only 4
+   dedicated CPU cores. You might have to request quota increases. You can
+   safely decrease the number of low-priority cores to 6 (the size of a single
+   NC6 instance) by decreasing the value of `ngpu` in
+   `scripts/azureml/timit.sh`, though an N-fold decrease will take roughly N
+   times as long. Any more than 120 cores won't be used.
 2. [Install the
    CLI](https://docs.microsoft.com/en-us/azure/machine-learning/how-to-configure-cli?tabs=public).
+   *Note:* you don't need a local installation of the Conda environment for
+   Azure since the environment is installed in the cloud.
 3. Configure the CLI with the desired subscription and resource groups as
    defaults:
 
@@ -126,40 +158,14 @@ without errors
 
    This will allow the recipe to submit jobs and create resources without
    specifying the environment explicitly.
-2. Set up the environment. Run
+4. If you have all the quotas necessary, you can just run
 
    ``` sh
-   az ml environment create --file scripts/azureml/create-environment-core.yaml
+   ./scripts/azureml/timit.sh /path/to/ldc/timit
    ```
 
-   This creates an environment with all the packages in
-   `environment-core.yaml`.
-3. Set up the compute clusters. Run
-
-   ``` sh
-   az ml compute create --file scripts/azureml/create-cluster-cpu.yaml
-   az ml compute create --file scripts/azureml/create-cluster-gpu.yaml
-   ```
-
-  This creates one dedicated, CPU-only cluster with a single node responsible
-  for doing the steps between any major work and a low-priority, GPU cluster
-  for doing the rest.
-4. (Optional) Double-check you've got the configuration working by running
-   pytest jobs. Run
-
-   ``` sh
-   az ml job create --file scripts/azureml/run-pytest.yaml
-   ```
-
-   The GPU component might be pre-empted - don't worry about that. Just make
-   sure there aren't any other errors.
-
-5. Set up the TIMIT dataset. TIMIT is licensed by the LDC so we can't do this
-   step automatically.
-
-   ``` sh
-   az ml data create --name timit-ldc --type uri_folder --path /uri/to/timit
-   ```
+   and finish successfully. This creates a workspace called `cnn-mellin` which
+   you should delete when you're done with.
 
 ## Advanced
 
@@ -170,8 +176,7 @@ itself. The files already written in `ext` should suffice. However, if you wish
 to: a) test the C++ interface; b) change the default algorithm of the
 interface; or c) benchmark the various algorithms, you can use CMake to compile
 the project. We assume the dev environment has been created as opposed to the
-core environment (see
-[Installation](#running-on-a-dedicated-instance-with-bash)).
+core environment.
 
 ``` sh
 CUDACXX="${CUDA_HOME}/bin/nvcc" \
@@ -194,41 +199,34 @@ when available.
 
 ### Hyperparameter search
 
-#### Azure
+The hyperparameter search has already been performed with the best resulting
+architecture configurations stored in `conf/models`. If you want to redo the
+search, the first thing you'll need is access to some Relational DataBase (RDB)
+to store results in. Unless you plan on performing the search serially (*not*
+recommended), you will need a proper RDB - [not
+SQLite](https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/004_distributed.html?highlight=deadlock).
 
-Like in the other cases, you'll need access to additional packages listed in
-`environment-dev.yaml`. Those packages should be installed in the environment:
-
-``` sh
-az ml environment create --file scripts/azureml/create-environment-dev.yaml
-```
-
-You've got two ways of handling `db_url` in Azure: the easy, less secure way,
-and the harder, more secure way.
-
-The easy way is to update `scripts/azureml/timit_wrapper.sh` and hard-code
-your URL in there. Of course, then the URL (including the password) is just
-sitting in the cloud in plain text.
-
-The second way is to add the URL as a secret to the workspace's Key Vault.
-First, you have to give permission for whatever account's logged in to the CLI
-to muck with secrets. Follow the instructions on [this
-page](https://go.microsoft.com/fwlink/?linkid=2125287) (note: you only need to
-grant permissions for secrets). If you don't know the name of the associated
-Key Vault, find it with the command
+Once you've configured the RDB and started it, you'll need to define the URL
+used by SQLAlchemy to access the RDB. Follow the instructions
+[here](https://docs.sqlalchemy.org/en/14/core/engines.html#database-urls).
+Different RDBs used different drivers. We've put `PostgreSQL + psycopg2`
+in the dev environment - you can update these as needed. Once you've figured
+out your URL, create the file `db_creds.sh` in the root of this project and
+fill the variable `db_url` with the url:
 
 ``` sh
-az ml workspace show  --query "key_vault" -o tsv
+# db_creds.sh
+db_url='my:database@url/here'
 ```
 
-Then you can navigate to the "Secrets" tab and add `db-url` as a secret
-(note the `-` instead of the `_`). Alternatively, you can add it via the
-CLI:
+Speaking of the dev environment: that will need to be installed instead. If you
+are using Azure, set `env_type=dev` in `scripts/azureml/timit.sh`.
 
-``` sh
-vault_name="$(az ml workspace show --query "key_vault" -o tsv | awk  -F '/' '{print $NF}')"
-az keyvault secret set --vault-name "${vault_name}" -n db-url --value "$(source db_creds.sh; echo $db_url)"
-```
+You will also need to keep the recipe from skipping over the steps related to
+the hyperparameter search. For dedicated running, just add the `-q` flag to the
+call to `./timit.sh`. If you're running on a scheduler, you'll need to update
+the flag `do_hyperparam=1` in the appropriate recipe
+`scripts/{azureml,slurm}/timit.sh`.
 
 ## License
 
