@@ -13,11 +13,13 @@ set -e
 python -c 'import asr'
 
 [ ! -f "data/timit/local/.complete" ] && \
-  sbatch $cpu_opts -c 1 -W scripts/slurm/timit_wrapper.sh -s 1 -i "$timit_dir"
+  sbatch $cpu_opts -c 1 -W --mem=1G \
+    scripts/slurm/timit_wrapper.sh -s 1 -i "$timit_dir"
 
 [ ! -f "data/timit/fbank-81-10ms/.complete" ] || \
 [ ! -f "data/timit/sigbank-41-2ms/.complete" ] && \
-  sbatch $cpu_opts -c 1 -a 1-2 -W scripts/slurm/timit_wrapper.sh -s 2
+  sbatch $cpu_opts -c 1 -a 1-2 -W --mem=5G -t 3:0:0 \
+    scripts/slurm/timit_wrapper.sh -s 2
 
 # hyperparameter search (can be skipped)
 if ((do_hyperparam)); then
@@ -29,11 +31,13 @@ if ((do_hyperparam)); then
     Sa="$(printf "%02d\n" $s)"
     Sb="$(printf "%02d\n" $((s + 1)))"
     if [ ! -f "exp/timit/completed_stages/$Sa" ]; then
-      sbatch $cpu_opts -c 1 -W scripts/slurm/timit_wrapper.sh -s $s
+      sbatch $cpu_opts --mem=256M -c 1 -W -t 0:10:0 \
+        scripts/slurm/timit_wrapper.sh -s $s
       touch "exp/timit/completed_stages/$Sa"
     fi
     if [ ! -f "exp/timit/completed_stages/$Sb" ]; then
-      sbatch $gpu_opts -c 4 -a 1-20 -W --gres=gpu:1 scripts/slurm/timit_wrapper.sh -s $((s + 1))
+      sbatch $gpu_opts -c 4 -a 1-64 -W --gres=gpu:1 --mem=25G \
+        scripts/slurm/timit_wrapper.sh -s $((s + 1))
       touch "exp/timit/completed_stages/$Sb"
     fi
   done

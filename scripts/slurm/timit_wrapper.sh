@@ -1,7 +1,6 @@
 #! /usr/bin/env bash
 #SBATCH --cpus-per-task=4
 #SBATCH --export=ALL
-#SBATCH --mem=16GB
 #SBATCH --output=logs/timit/slurm-%J.log
 
 # XXX(sdrobert): If TIMIT_CKPT_DIR is set, it will be used to store checkpoints
