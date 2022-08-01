@@ -28,9 +28,13 @@ if ((do_hyperparam)); then
   for s in {3..13..2}; do
     Sa="$(printf "%02d\n" $s)"
     Sb="$(printf "%02d\n" $((s + 1)))"
-    [ ! -f "exp/timit/completed_stages/$Sa" ] && \
+    if [ ! -f "exp/timit/completed_stages/$Sa" ]; then
       sbatch $cpu_opts -c 1 -W scripts/slurm/timit_wrapper.sh -s $s
-    [ ! -f "exp/timit/completed_stages/$Sb" ] && \
-      sbatch $gpu_opts -c 4 -a 1-20 -W --gres=gpu:1 scripts/slurm/timit_wrapper.sh -s $s
+      touch "exp/timit/completed_stages/$Sa"
+    fi
+    if [ ! -f "exp/timit/completed_stages/$Sb" ]; then
+      sbatch $gpu_opts -c 4 -a 1-20 -W --gres=gpu:1 scripts/slurm/timit_wrapper.sh -s $((s + 1))
+      touch "exp/timit/completed_stages/$Sb"
+    fi
   done
 fi
