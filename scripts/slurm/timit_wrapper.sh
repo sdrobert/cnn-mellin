@@ -25,12 +25,4 @@ if [ ! -z "${SLURM_ARRAY_TASK_ID}" ]; then
   export TIMIT_STRIDE="${SLURM_ARRAY_TASK_COUNT}"
 fi
 
-echo "Starting stage $stage"
 ./timit.sh -q -x "$@"
-if [ $? -eq 0 ]; then
-  echo "Succeeded"
-  exit 0
-else
-  echo "Failed"
-  exit 1
-fi

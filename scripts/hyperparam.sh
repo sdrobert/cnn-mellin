@@ -104,7 +104,7 @@ init_study () {
   if [ "$sty" = "model" ]; then
     num_epochs=$(( $num_epochs - 10 ))
   fi
-  $prior_cmd | \
+  $prior_cmd | sed -n '/No CUDA runtime is found/!p' | \
     sed 's/\(max_.*_mask\)[ ]*=.*/\1 = 10000/g;s/num_epochs[ ]*=.*/num_epochs = '"${num_epochs}"'/g' \
     > "$opt/conf/${study_name}.ini"
   if [ "$sz" = "sm" ]; then
@@ -147,9 +147,8 @@ run_study () {
     return 0
   fi
   for n in $(seq 1 $max_retries); do
-    # wear out heartbeat in case
     echo "Sleeping 2min to wear out heartbeat"
-    sleep 120
+    sleep $(( 120 + OFFSET ))
     echo "Attempt $n/$max_retries to optimize '${study_name}'"
     python asr.py \
       --model-dir "$ckpt" \
