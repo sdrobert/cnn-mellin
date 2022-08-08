@@ -10,7 +10,9 @@
 # If TIMIT_CKPT_DIR is not set, it will default to the optim/ckpts subdirectory
 # of the experiment folder.
 if [ -d "/checkpoint/${USER}/${SLURM_JOB_ID}" ]; then
-  export TIMIT_CKPT_DIR="/checkpoint/${USER}/${SLURM_JOB_ID}"
+  export TIMIT_CKPT_DIR="/checkpoint/${USER}/${SLURM_JOB_ID}/ckpt"
+  export TORCH_EXTENSIONS_DIR="/checkpoint/${USER}/${SLURM_JOB_ID}/torch_extensions"
+  mkdir -p "$TIMIT_CKPT_DIR" "$TORCH_EXTENSIONS_DIR"
 fi
 
 stage="$(echo "$*" | sed -n 's/.*-s \([0-9]*\).*/\1/p')"

@@ -33,12 +33,10 @@ if ((do_hyperparam)); then
     if [ ! -f "exp/timit/completed_stages/$Sa" ]; then
       sbatch $cpu_opts --mem=256M -c 1 -W -t 0:10:0 \
         scripts/slurm/timit_wrapper.sh -s $s
-      touch "exp/timit/completed_stages/$Sa"
     fi
     if [ ! -f "exp/timit/completed_stages/$Sb" ]; then
       sbatch $gpu_opts -c 4 -a 1-64 -W --gres=gpu:1 --mem=25G \
         scripts/slurm/timit_wrapper.sh -s $((s + 1))
-      touch "exp/timit/completed_stages/$Sb"
     fi
   done
 fi

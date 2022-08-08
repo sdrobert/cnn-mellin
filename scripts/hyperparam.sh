@@ -30,10 +30,7 @@ declare -A gpu_mem_limit_map=( \
 )
 
 
-is_complete () {
-  [[ "$(optuna trials --study-name $1 --storage $db_url -f yaml 2> /dev/null | grep -e 'state: COMPLETE' | wc -l)" -ge "$2" ]]
-  return $?
-}
+is_complete () [[ "$(optuna trials --study-name $1 --storage $db_url -f yaml 2> /dev/null | grep -e 'state: COMPLETE' | wc -l)" -ge "$2" ]]
 
 get_best_prior () {
   # determine the best parameter setting up to and excluding the current
@@ -175,12 +172,19 @@ for s in {03..14}; do
       else
         sz=lg
       fi
+      all_done=1
       for model in "${models[@]}"; do
         for feat in "${feats[@]}"; do
           $cmd $model $feat $m_or_t-$sz
+          [ "$cmd" = "run_study" ] && \
+            is_complete "$m_or_t-$model-$sz-$feat" "${num_trials_map[$sz]}" || \
+            all_done=0
         done
       done
-      touch "$exp/completed_stages/$s"
+      # run_study returns when all remaining trials are either completed or
+      # being run by someone else. Only touch the flag when the study is
+      # actually completed.
+      ((all_done)) && touch "$exp/completed_stages/$s"
       echo "Finished stage $s"
     else
       echo "'$exp/completed_stages/$s' exists. Skipping stage $s"
