@@ -31,7 +31,7 @@ if ((do_hyperparam)); then
     Sa="$(printf "%02d\n" $s)"
     Sb="$(printf "%02d\n" $((s + 1)))"
     if [ ! -f "exp/timit/completed_stages/$Sa" ]; then
-      sbatch $cpu_opts --mem=256M -c 1 -W -t 0:10:0 \
+      sbatch $cpu_opts --mem=256M -c 1 -W -t 0:20:0 \
         scripts/slurm/timit_wrapper.sh -s $s
     fi
     if [ ! -f "exp/timit/completed_stages/$Sb" ]; then
