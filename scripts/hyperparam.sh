@@ -6,7 +6,7 @@ fi
 
 opt="$exp/optim"
 ckpt="${TIMIT_CKPT_DIR:-"$opt/ckpts"}"
-mkdir -p "$opt/"{conf,completed_stages} "$ckpt"
+mkdir -p "$opt/conf" "$ckpt" "$exp/competed_stages"
 
 [ -f ./db_creds.sh ] && source db_creds.sh
 if [ -z "$db_url" ]; then
