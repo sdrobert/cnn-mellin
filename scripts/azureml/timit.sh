@@ -6,7 +6,7 @@ timit_dir="${1:-"~/Databases/TIMIT"}"
 ws=cnn-mellin  # workspace name
 env_type=dev  # core or dev
 ncpu=1  # maximum number of CPU nodes in the GPU cluster
-ngpu=20  # maximum number of GPU nodes in the GPU cluster
+ngpu=1  # maximum number of GPU nodes in the GPU cluster
 do_hyperparam=1  # do hyperparameter search (optional, requires dev)
 
 run_stage() {
@@ -62,10 +62,13 @@ if ((do_hyperparam)); then
     exit 1
   fi
 
-  # sub_id="$(az ad signed-in-user show --query id -o tsv)"
-  # vault_name="$(az ml workspace show -n $ws --query "key_vault" -o tsv | awk -F / '{print $NF}')"
-  # az keyvault set-policy -n "${vault_name}" --object-id "${sub_id}" --secret-permissions all
-  # az keyvault secret set --vault-name "${vault_name}" -n db-url --value="$db_url"
+  if [ ! -f "exp/timit/completed_stages/create_db_secret" ]; then
+    sub_id="$(az ad signed-in-user show --query id -o tsv)"
+    vault_name="$(az ml workspace show -n $ws --query "key_vault" -o tsv | awk -F / '{print $NF}')"
+    az keyvault set-policy -n "${vault_name}" --object-id "${sub_id}" --secret-permissions all
+    az keyvault secret set --vault-name "${vault_name}" -n db-url --value="$db_url"
+    touch exp/timit/completed_stages/create_db_secret
+  fi
 
   for s in {3..13..2}; do
     run_stage $s
