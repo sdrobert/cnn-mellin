@@ -29,6 +29,8 @@ declare -A gpu_mem_limit_map=( \
   [lg]="$(python -c 'print(12 * (1024 ** 3))')" \
 )
 
+# usually one would use bc, but it isn't installed on Azure...
+float_lt () [[ $(python -c "print(int($1 < $2))") -eq 1 ]]
 
 is_complete () [[ "$(optuna trials --study-name $1 --storage $db_url -f yaml 2> /dev/null | grep -e 'state: COMPLETE' | wc -l)" -ge "$2" ]]
 
@@ -64,7 +66,7 @@ get_best_prior () {
     fi
     local cur_best="$(optuna best-trial --study-name ${cur_name} --storage $db_url -f yaml 2> /dev/null | grep -e 'value: ' | cut -d ' ' -f 2)"
     [ -z "$cur_best" ] && return 1
-    if (( $(echo "${cur_best} < ${best}" | bc -l) )); then
+    if float_lt "${cur_best}" "${best}"; then
       best="${cur_best}"
       best_name="${cur_name}"
     fi

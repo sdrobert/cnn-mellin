@@ -63,8 +63,16 @@ if ((do_hyperparam)); then
   fi
 
   if [ ! -f "exp/timit/completed_stages/create_db_secret" ]; then
-    sub_id="$(az ad signed-in-user show --query id -o tsv)"
-    vault_name="$(az ml workspace show -n $ws --query "key_vault" -o tsv | awk -F / '{print $NF}')"
+    sub_id="$(az ad signed-in-user show --query id -o tsv | tr -d '\r')"
+    if [ -z "${sub_id}" ]; then
+      echo "Could not acquire subscription id" 2>&1
+      exit 1
+    fi
+    vault_name="$(az ml workspace show -n $ws --query "key_vault" -o tsv | awk -F / '{print $NF}' | tr -d '\r')"
+    if [ -z "${vault_name}" ]; then
+      echo "Could not acquire vault name" 2>&1
+      exit 1
+    fi
     az keyvault set-policy -n "${vault_name}" --object-id "${sub_id}" --secret-permissions all
     az keyvault secret set --vault-name "${vault_name}" -n db-url --value="$db_url"
     touch exp/timit/completed_stages/create_db_secret
