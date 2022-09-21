@@ -500,7 +500,13 @@ def optim_important(options):
         study_name = os.path.basename(options.db_url.database).split(".")[0]
     study = optim.optuna.load_study(study_name, str(options.db_url))
 
-    importances = optim.optuna.importance.get_param_importances(study)
+    # XXX(sdrobert): the rather awkward seed is because I didn't realize this would be
+    # nondeterministic at first. I found a seed which matched the importance weights
+    # previously assigned.
+    evaluator = optim.optuna.importance.FanovaImportanceEvaluator(seed=8)
+    importances = optim.optuna.importance.get_param_importances(
+        study, evaluator=evaluator
+    )
     kept = set()
     for param, importance in importances.items():
         if (options.threshold is not None and importance < options.threshold) or (
