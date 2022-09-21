@@ -255,14 +255,6 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
             "info",
         )
         optim_run_subparser.add_argument(
-            "--model-dir",
-            type=writable_dir,
-            default=None,
-            help="Path to save temporary model/optimze checkpoints to. By default, "
-            "uses tempfile.TemporaryDirectory(). Used both to recover the optimal "
-            "error rates and to checkpoint in case of preemption",
-        )
-        optim_run_subparser.add_argument(
             "--max-failed-retries",
             type=get_bounded_number_type(int, (0, float("inf"))),
             default=10,
