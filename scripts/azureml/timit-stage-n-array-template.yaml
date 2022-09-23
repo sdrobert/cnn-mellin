@@ -1,0 +1,14 @@
+  array_$n:
+    type: command
+    display_name: timit_stage_${stage}_array_${n}
+    component: azureml:timit_stage_n@latest
+    compute: azureml:cnn-mellin-${device}
+    inputs:
+      offset: $n
+      stride: $N
+      stage: $stage
+      data:
+        path: azureml://datastores/workspaceblobstore/paths/data/timit
+    outputs:
+      exp:
+        path: azureml://datastores/workspaceblobstore/paths/exp/timit

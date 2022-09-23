@@ -5,8 +5,8 @@ set -e
 timit_dir="${1:-"~/Databases/TIMIT"}"
 ws=cnn-mellin  # workspace name
 env_type=dev  # core or dev
-ncpu=1  # maximum number of CPU nodes in the GPU cluster
-ngpu=1  # maximum number of GPU nodes in the GPU cluster
+ncpu=1   # maximum number of CPU nodes in the GPU cluster
+ngpu=20  # maximum number of GPU nodes in the GPU cluster
 do_hyperparam=1  # do hyperparameter search (optional, requires dev)
 
 run_stage() {
@@ -15,20 +15,30 @@ run_stage() {
     echo "'exp/timit/completed_stages/$stage' exists. Skipping stage $1"
     return 0
   fi
+  mkdir -p "exp/timit/jobs"
   shift
-  local set_string="--set inputs.stage=$stage display_name=timit-stage-$stage"
+  local N=1
+  device=cpu
   while [ $# -gt 0 ]; do
     case "$1" in
       -n)
         shift;
-        set_string="${set_string} resources.instance_count=$1";
+        N="$1";
         shift;;
       -gpu)
-        set_string="${set_string} compute=azureml:cnn-mellin-gpu";
+        device=gpu;
         shift;;
     esac
   done
-  az ml job create -w $ws -f scripts/azureml/timit-stage-n.yaml --stream $set_string
+  local n
+  pth="exp/timit/jobs/timit-stage-$stage-pipeline.yaml"
+  cp scripts/azureml/timit-stage-n-pipeline-header.yaml "$pth"
+  for n in $(seq 0 $((N-1))); do
+    n=$n stage=$stage N=$N device=$device envsubst \
+      < scripts/azureml/timit-stage-n-array-template.yaml \
+      >> "$pth"
+  done
+  az ml job create -w $ws -f "$pth" --stream
   touch "exp/timit/completed_stages/$stage"
 }
 
@@ -40,6 +50,9 @@ if [ ! -f "exp/timit/completed_stages/00" ]; then
   az ml compute create -w $ws -f scripts/azureml/create-cluster-cpu.yaml --set max_instances=$ncpu
   az ml compute create -w $ws -f scripts/azureml/create-cluster-gpu.yaml --set max_instances=$ngpu
   az ml data create -w $ws -n timit-ldc --type uri_folder --path "$timit_dir"
+  # XXX(sdrobert): this uploads the codebase and the component. If you change
+  # either you'll have to re-run the command to use the new version(s)
+  az ml component create -w $ws --file scripts/azureml/timit-stage-n-component.yaml
   touch exp/timit/completed_stages/00
 else
   echo "'exp/timit/completed_stages/00' exists. Skipping Azure setup"

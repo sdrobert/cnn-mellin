@@ -1,0 +1,38 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: timit_stage_n
+version: 0.2
+type: command
+code: ../..
+command: |
+  mkdir -p data exp;
+  ln -s ${{inputs.data}} data/timit;
+  ln -s ${{outputs.exp}} exp/timit;
+  export TIMIT_OFFSET=${{inputs.offset}};
+  export TIMIT_STRIDE=${{inputs.stride}};
+  bash ./scripts/azureml/timit_wrapper.sh -s ${{inputs.stage}} -q -x
+environment: azureml:cnn-mellin@latest
+compute: azureml:cnn-mellin-cpu
+resources:
+  instance_count: 1
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+inputs:
+  offset:
+    type: integer
+    min: 0
+    default: 0
+  stride:
+    type: integer
+    min: 1
+    default: 1
+  stage:
+    type: integer
+    min: 3
+  data:
+    type: uri_folder
+    mode: ro_mount
+outputs:
+  exp:
+    type: uri_folder
+    mode: rw_mount
