@@ -10,7 +10,7 @@ import torch
 import param
 import pydrobert.torch.training as training
 import pydrobert.torch.util as util
-import pydrobert.torch.layers as layers
+import pydrobert.torch.modules as layers
 
 import pydrobert.torch.data as data
 import models
@@ -18,6 +18,10 @@ import models
 from common import get_num_avail_cores
 from layers import ScaledGaussianNoise
 from tqdm import tqdm
+
+
+# torch.backends.cudnn.enabled = False
+# torch.backends.cudnn.benchmark = False
 
 
 class MyTrainingStateParams(training.TrainingStateParams):
@@ -432,7 +436,8 @@ def train_am(
     train_data_params: data.SpectDataSetParams,
     train_dir: str,
     dev_dir: str,
-    model_dir: Optional[str] = None,
+    ckpt_dir: Optional[str] = None,
+    state_csv: Optional[str] = None,
     device: Union[torch.device, str] = "cpu",
     num_data_workers: int = get_num_avail_cores() - 1,
     epoch_callbacks: Sequence[Callable[[int, float, float], Any]] = tuple(),
@@ -458,14 +463,11 @@ def train_am(
     model.to(device)
     optimizer = training_params.optimizer(model.parameters(), lr=1e-4)
 
-    if model_dir is not None:
-        state_dir = os.path.join(model_dir, "training")
-        state_csv = os.path.join(model_dir, "hist.csv")
-    else:
-        state_dir = state_csv = None
+    if state_csv is None and ckpt_dir is not None:
+        state_csv = os.path.join(ckpt_dir, "hist.csv")
 
     controller = training.TrainingStateController(
-        training_params, state_csv, state_dir, warn=not quiet
+        training_params, state_csv, ckpt_dir, warn=not quiet
     )
 
     train_loader = data.SpectTrainingDataLoader(
@@ -502,11 +504,13 @@ def train_am(
         for callback in epoch_callbacks:
             callback(epoch, train_loss, dev_err)
         epoch += 1
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     if not quiet:
         print(f"Finished training at epoch {epoch - 1}", file=sys.stderr)
 
-    if model_dir is not None:
+    if ckpt_dir is not None:
         epoch = controller.get_best_epoch()
         if not quiet:
             print(

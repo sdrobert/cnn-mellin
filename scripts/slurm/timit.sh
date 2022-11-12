@@ -6,7 +6,7 @@ export CUDA_HOME=/pkgs/cuda-11.3
 timit_dir="${1:"~/Databases/TIMIT"}"
 cpu_opts="${2:-"-p cpu"}"
 gpu_opts="${3:-"-p p100"}"
-do_hyperparam=1
+do_hyperparam=0
 
 set -e
 
@@ -31,7 +31,7 @@ if ((do_hyperparam)); then
     Sa="$(printf "%02d\n" $s)"
     Sb="$(printf "%02d\n" $((s + 1)))"
     if [ ! -f "exp/timit/completed_stages/$Sa" ]; then
-      sbatch $cpu_opts --mem=256M -c 1 -W -t 0:20:0 \
+      sbatch $cpu_opts --mem=256M -c 1 -W -t 0:40:0 \
         scripts/slurm/timit_wrapper.sh -s $s
     fi
     if [ ! -f "exp/timit/completed_stages/$Sb" ]; then
@@ -39,4 +39,13 @@ if ((do_hyperparam)); then
         scripts/slurm/timit_wrapper.sh -s $((s + 1))
     fi
   done
+  [ ! -f "conf/model/lcorr-fbank-81-10ms.ini" ] || \
+  [ ! -f "conf/model/lcorr-sigbank-41-10ms.ini"] || \
+  [ ! -f "conf/model/mcorr-fbank-81-10ms.ini" ] || \
+  [ ! -f "conf/model/mcorr-sigbank-41-10ms.ini" ] && \
+    sbatch $cpu_opts --mem=256M -c 1 -W -t 0:40:0 \
+      scripts/slurm/timit_wrapper.sh -s 15
 fi
+
+sbatch $gpu_opts -c 4 -a 1-80 -W --gres=gpu:1 --mem=25G \
+  scripts/slurm/timit_wrapper.sh -s 16

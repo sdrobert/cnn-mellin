@@ -40,6 +40,9 @@ Options:
                   Value: '$data'
   -o PTH          Location to store experiment artifacts.
                   Value: '$exp'
+  -O PTH          If set, specifies seperate location to store model
+                  checkpoints. Otherwise, store with other experiment
+                  artifacts (-o).
   -b 'A [B ...]'  The beam widths to test for decoding
   -n N            Number of repeated trials to perform.
                   Value: '$seeds'
@@ -94,6 +97,7 @@ timit=
 data=data/timit
 exp=exp/timit
 seeds=20
+max_retries=50
 offset=1
 device=cuda
 feats=( "${ALL_FEATS[@]}" )
@@ -103,7 +107,7 @@ only=0
 do_hyperparam=0
 check_jit=1
 
-while getopts "qxhws:k:i:d:o:b:n:c:f:m:" opt; do
+while getopts "qxhws:k:i:d:o:O:b:n:c:f:m:" opt; do
   case $opt in
     q)
       do_hyperparam=1
@@ -138,6 +142,9 @@ while getopts "qxhws:k:i:d:o:b:n:c:f:m:" opt; do
       ;;
     o)
       exp="$OPTARG"
+      ;;
+    O)
+      ckpt_dir="$OPTARG"
       ;;
     b)
       argcheck_all_nat $opt "$OPTARG"
@@ -222,10 +229,58 @@ argcheck_is_rw o "$exp"
 
 if ((do_hyperparam)); then
   source scripts/hyperparam.sh
-elif [ "$stage" -le 14 ]; then
+elif [ "$stage" -le 15 ]; then
+  if ((only)); then
+    echo "Stage $stage is a part of hyperparameter selection. If you want " \
+      "to run that, include the flag -q. Otherwise skip to stage 16." 1>&2
+    exit 1
+  fi
   echo \
-    "Skipping hyperparameter stages $stage to 14. If you wanted to do" \
+    "Skipping hyperparameter stages $stage to 16. If you wanted to do" \
     "these, rerun with the -q flag."
+fi
+
+# for model in "${models[@]}"; do
+#   for feat in "${feats[@]}"; do
+#     mconf="conf/model/$model-$feat.ini"
+#     if [ ! -f "$mconf" ]; then
+#       echo "could not find '$mconf'" \
+#         "(did you finish the hyperparameter search?)" 1>&2
+#       exit 1
+#     fi
+#   done
+# done
+
+if [ $stage -le 16 ]; then
+  for (( i=OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += $STRIDE )); do
+    model="${models[((i / (${#feats[@]} * seeds) ))]}"
+    ii=$((i % (${#feats[@]} * seeds) ))
+    feat="${feats[((ii / seeds))]}"
+    seed="$((ii % seeds))"
+    mconf="conf/model/$model-$feat.ini"
+    model_dir="$exp/$model-$feat/$seed"
+    mkdir -p "$model_dir"
+    if [ ! -f "$model_dir/model.pt" ]; then
+      echo "Beginning training of $model-$feat with seed $seed"
+      for ((n=1; n < max_retries; n++)); do
+        echo "Attempt $n/$max_retries of training"
+        python asr.py ${ckpt_dir+--ckpt-dir "$ckpt_dir/$model-$feat/$seed"} \
+          --device "$device" \
+          --read-ini "$mconf" \
+          train \
+            "$data/$feat/train" \
+            "$data/$feat/dev" \
+            "$model_dir" \
+            --seed $seed && echo "Run $n/$max_retries succeeded!" && break
+          echo "Run $n/$max_retries failed"
+      done
+      [ $n -eq $max_retries ] && exit 1
+      echo "Done training of $model-$feat with seed $seed"
+    else
+      echo "'$model_dir/model.pt' already exists; skipping training"
+    fi
+  done
+  ((only)) && exit 1
 fi
 
 if ((only)); then
@@ -233,16 +288,5 @@ if ((only)); then
     "with an existing stage" 1>&2
   exit 1
 fi
-
-for model in "${models[@]}"; do
-  for feat in "${feats[@]}"; do
-    mconf="conf/model/$model-$feat.ini"
-    if [ ! -f "$mconf" ]; then
-      echo "could not find '$mconf'" \
-        "(did you finish the hyperparameter search?)" 1>&2
-      exit 1
-    fi
-  done
-done
 
 exit 0

@@ -121,10 +121,10 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         description="Training, decoding, or hyperparameter optimization"
     )
     parser.add_argument(
-        "--model-dir",
+        "--ckpt-dir",
         type=writable_dir,
         default=None,
-        help="Where to save/load models and training history to/from",
+        help="Where to store model checkpoints. If unset, stored in model_dir/training",
     )
     parser.add_argument(
         "--device",
@@ -147,6 +147,11 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         help="Validation directory. If unset, uses training directory",
     )
     train_parser.add_argument(
+        "model_dir",
+        type=writable_dir,
+        help="Where to save/load models and training history to/from",
+    )
+    train_parser.add_argument(
         "--quiet",
         action="store_true",
         default=False,
@@ -158,6 +163,9 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         default=get_num_avail_cores() - 1,
         help="Number of background workers for training data loader. 0 is serial. "
         "Defaults to one fewer than the number of virtual cores on the machine.",
+    )
+    train_parser.add_argument(
+        "--seed", type=int, default=None, help="If set, overrides the config file seed"
     )
 
     if optim is not None:
@@ -344,32 +352,36 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
 
 
 def train(options, param_dict):
-    if options.model_dir is None:
-        warnings.warn("--model-dir was not set! Will not save anything!")
+    ckpt_dir = options.ckpt_dir
+    if ckpt_dir is None:
+        ckpt_dir = os.path.join(options.model_dir, "training")
+        os.makedirs(ckpt_dir, exist_ok=True)
+    if options.seed is not None:
+        param_dict["training"].seed = options.seed
     model, _ = running.train_am(
         param_dict["model"],
         param_dict["training"],
         param_dict["data"],
         options.train_dir,
         options.train_dir if options.dev_dir is None else options.dev_dir,
-        options.model_dir,
+        ckpt_dir,
+        os.path.join(options.model_dir, "hist.csv"),
         options.device,
         options.num_data_workers,
         tuple(),
         options.quiet,
     )
-    if options.model_dir is not None:
-        model_pt = os.path.join(options.model_dir, "model.pt")
-        if not options.quiet:
-            print(f"Saving final model to '{model_pt}'", file=sys.stderr)
-        # add the number of classes and number of filters to the state dict so that
-        # we don't have to keep track of the
-        state_dict = model.state_dict()
-        assert "target_dim" not in state_dict
-        assert "freq_dim" not in state_dict
-        state_dict["target_dim"] = model.target_dim
-        state_dict["freq_dim"] = model.freq_dim
-        torch.save(state_dict, model_pt)
+    model_pt = os.path.join(options.model_dir, "model.pt")
+    if not options.quiet:
+        print(f"Saving final model to '{model_pt}'", file=sys.stderr)
+    # add the number of classes and number of filters to the state dict so that
+    # we don't have to keep track of the
+    state_dict = model.state_dict()
+    assert "target_dim" not in state_dict
+    assert "freq_dim" not in state_dict
+    state_dict["target_dim"] = model.target_dim
+    state_dict["freq_dim"] = model.freq_dim
+    torch.save(state_dict, model_pt)
 
 
 def optim_init(options, param_dict):
@@ -412,7 +424,7 @@ def optim_run(options):
     study = optim.optuna.load_study(study_name, storage, sampler)
     if study.user_attrs["pruner"] == "hyperband":
         study.pruner = optim.optuna.pruners.HyperbandPruner(
-            max_resource=study.user_attrs["max_epochs"]
+            max_resource=study.user_attrs["max_epochs"],
         )
     elif study.user_attrs["pruner"] == "median":
         study.pruner = optim.optuna.pruners.MedianPruner()
@@ -426,7 +438,7 @@ def optim_run(options):
             f"the study was initialized with ({study.user_attrs['device']}). Will use "
             "the latter."
         )
-    checkpoint_dir = options.model_dir
+    checkpoint_dir = options.ckpt_dir
     if checkpoint_dir is None:
         checkpoint_dir_ = TemporaryDirectory()  # keep in scope
         checkpoint_dir = checkpoint_dir_.name

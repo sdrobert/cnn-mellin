@@ -106,7 +106,7 @@ def test_train_am(temp_dir, device, populate_torch_dir, include_hist):
         data.SpectDataSetParams(),
         train_dir,
         train_dir,
-        model_dir=model_dir,
+        ckpt_dir=model_dir,
         device=device,
         num_data_workers=0,
     )
@@ -117,7 +117,7 @@ def test_train_am(temp_dir, device, populate_torch_dir, include_hist):
         data.SpectDataSetParams(),
         train_dir,
         train_dir,
-        model_dir=model_dir,
+        ckpt_dir=model_dir,
         device=device,
         num_data_workers=0,
     )

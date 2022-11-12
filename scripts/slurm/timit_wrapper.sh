@@ -3,16 +3,13 @@
 #SBATCH --export=ALL
 #SBATCH --output=logs/timit/slurm-%J.log
 
-# XXX(sdrobert): If TIMIT_CKPT_DIR is set, it will be used to store checkpoints
-# of models during hyperparameter tuning. When a trial completes successfully,
-# the subdirectory for the trial is removed. If the files are absent (e.g. they
-# were cleared), the trial will restart from epoch 1.
-# If TIMIT_CKPT_DIR is not set, it will default to the optim/ckpts subdirectory
-# of the experiment folder.
+global_args=( )
+
 if [ -d "/checkpoint/${USER}/${SLURM_JOB_ID}" ]; then
   export TIMIT_CKPT_DIR="/checkpoint/${USER}/${SLURM_JOB_ID}/ckpt"
   export TORCH_EXTENSIONS_DIR="/checkpoint/${USER}/${SLURM_JOB_ID}/torch_extensions"
   mkdir -p "$TIMIT_CKPT_DIR" "$TORCH_EXTENSIONS_DIR"
+  global_args+=( "-O" "$TIMIT_CKPT_DIR" )
 fi
 
 stage="$(echo "$*" | sed -n 's/.*-s \([0-9]*\).*/\1/p')"
@@ -27,4 +24,4 @@ if [ ! -z "${SLURM_ARRAY_TASK_ID}" ]; then
   export TIMIT_STRIDE="${SLURM_ARRAY_TASK_COUNT}"
 fi
 
-./timit.sh -q -x "$@"
+./timit.sh -q -x "$@" "${global_args[@]}"

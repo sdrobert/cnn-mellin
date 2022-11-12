@@ -5,7 +5,7 @@ if [ -z "$stage" ]; then
 fi
 
 opt="$exp/optim"
-ckpt="${TIMIT_CKPT_DIR:-"$opt/ckpts"}"
+ckpt="${ckpt_dir:-"$opt/ckpts"}"
 mkdir -p "$opt/conf" "$ckpt" "$exp/completed_stages"
 
 [ -f ./db_creds.sh ] && source db_creds.sh
@@ -16,17 +16,16 @@ if [ -z "$db_url" ]; then
   exit 1
 fi
 
-max_retries=10
 declare -A num_epochs_map=( [sm]=40 [md]=50 [lg]=60 )
 declare -A num_trials_map=( [sm]=512 [md]=256 [lg]=128 )
 declare -A top_k_map=( [md]=10 [lg]=5 )
-declare -A pruner_map=( [sm]=none [md]=none [lg]=hyperband )
+declare -A pruner_map=( [sm]=none [md]=none [lg]=none )
 declare -A sampler_map=( [sm]=random [md]=random [lg]=tpe )
 declare -A prev_sz_map=( [md]=sm [lg]=md )
 declare -A gpu_mem_limit_map=( \
   [sm]="$(python -c 'print(6 * (1024 ** 3))')" \
   [md]="$(python -c 'print(9 * (1024 ** 3))')" \
-  [lg]="$(python -c 'print(12 * (1024 ** 3))')" \
+  [lg]="$(python -c 'print(11 * (1024 ** 3))')" \
 )
 
 # usually one would use bc, but it isn't installed on Azure...
@@ -48,8 +47,11 @@ get_best_prior () {
   pairs=( )
   if [ "$upto_sz" != "sm" ]; then
     pairs+=( "model-sm" "train-sm" )
-    if [ "$upto_sz" = "lg" ]; then
+    if [ "$upto_sz" != "md" ]; then
       pairs+=( "model-md" "train-md" )
+      if [ "$upto_sz" = "complete" ]; then
+        pairs+=( "model-lg" "train-lg" )
+      fi
     fi
   fi
   if [ "$upto_sty" = "train" ]; then
@@ -145,17 +147,20 @@ run_study () {
     echo "Already done ${num_trials} trials for ${study_name}"
     return 0
   fi
+  local v=0
   for n in $(seq 1 $max_retries); do
     echo "Sleeping 2min to wear out heartbeat"
     sleep $(( 120 + OFFSET ))
     echo "Attempt $n/$max_retries to optimize '${study_name}'"
     python asr.py \
-      --model-dir "$ckpt" \
+      --ckpt-dir "$ckpt" \
       optim --study-name "${study_name}" "$db_url" run \
-      --sampler "$sampler" && echo "Run $n/$max_retries succeeded!" && break
+      --sampler "$sampler"
+    v=$?
+    [ $v -eq 0 ] && echo "Run $n/$max_retries succeeded!" && break
     echo "Run $n/$max_retries failed!"
   done
-  return $?
+  return $v
 }
 
 for s in {03..14}; do
@@ -178,9 +183,12 @@ for s in {03..14}; do
       for model in "${models[@]}"; do
         for feat in "${feats[@]}"; do
           $cmd $model $feat $m_or_t-$sz
-          [ "$cmd" = "run_study" ] && \
-            is_complete "$m_or_t-$model-$sz-$feat" "${num_trials_map[$sz]}" || \
-            all_done=0
+          if [ "$cmd" = "run_study" ]; then
+            is_complete \
+                "$m_or_t-$model-$sz-$feat" \
+                "${num_trials_map[$sz]}" \
+              || all_done=0
+          fi
         done
       done
       # run_study returns when all remaining trials are either completed or
@@ -194,3 +202,23 @@ for s in {03..14}; do
     ((only)) && exit 0
   fi
 done
+
+if [ $stage -le 15 ]; then
+  mkdir -p "conf/model"
+  for model in "${models[@]}"; do
+    for feat in "${feats[@]}"; do
+      mconf="conf/model/$model-$feat.ini"
+      if [ ! -f "$mconf" ]; then
+        echo "Creating '$mconf'"
+        best_prior="$(get_best_prior $model $feat model-complete)"
+        python asr.py optim --study-name $best_prior $db_url best - | \
+          sed -n '/No CUDA runtime is found/!p' | \
+          sed 's/\(max_.*_mask\)[ ]*=.*/\1 = 10000/g;s/num_epochs[ ]*=.*/num_epochs = 100/g' \
+          > "$mconf"
+      else
+        echo "'$mconf' exists. Skipping"
+      fi
+    done
+  done
+  ((only)) && exit 0
+fi

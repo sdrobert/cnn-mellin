@@ -21,4 +21,4 @@ dependencies:
     - azureml-core
     - pydrobert-param==0.3.0
     - "git+https://github.com/sdrobert/pydrobert-speech.git@fd0c48d9db0e4ff189f37d6f655dcac6070c70dd"
-    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@7abad0dbb2e80b4267aebcee492aa9fd7d83ea3f"
+    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@86472ab542c50468bb30730b603ae10f7de0cca3"

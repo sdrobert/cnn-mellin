@@ -397,6 +397,7 @@ def objective(trial: optuna.Trial, checkpoint_dir: Optional[str] = None) -> floa
             user_attrs["data_dir"],
             user_attrs["data_dir"],
             checkpoint_dir,
+            None,
             device,
             user_attrs["num_data_workers"],
             [pruner_callback],
