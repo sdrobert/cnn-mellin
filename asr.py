@@ -134,8 +134,8 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
     )
     pargparse.add_parameterized_print_group(parser, parameterized=param_dict)
     pargparse.add_parameterized_read_group(parser, parameterized=param_dict)
-
     subparsers = parser.add_subparsers(required=True, dest="command")
+
     train_parser = subparsers.add_parser("train", help="Train an acoustic model")
     train_parser.add_argument(
         "train_dir", type=readable_dir, help="Training data directory"
@@ -166,6 +166,31 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
     )
     train_parser.add_argument(
         "--seed", type=int, default=None, help="If set, overrides the config file seed"
+    )
+
+    decode_parser = subparsers.add_parser(
+        "decode", help="Decode with an already-trained acoustic model"
+    )
+    decode_parser.add_argument(
+        "model_pt", type=argparse.FileType("rb"), help="Path to model file"
+    )
+    decode_parser.add_argument(
+        "decode_dir", type=readable_dir, help="Path to data to decode"
+    )
+    decode_parser.add_argument(
+        "hyp_dir", type=writable_dir, help="Where to store hypothesis tokens"
+    )
+    decode_parser.add_argument(
+        "--beam-width",
+        type=int,
+        default=1,
+        help="Number of hypotheses to consider at once in search",
+    )
+    decode_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress output to stderr",
     )
 
     if optim is not None:
@@ -384,6 +409,19 @@ def train(options, param_dict):
     torch.save(state_dict, model_pt)
 
 
+def decode(options, param_dict):
+    running.decode_am(
+        param_dict["model"],
+        param_dict["data"],
+        options.model_pt,
+        options.decode_dir,
+        options.beam_width,
+        options.hyp_dir,
+        options.device,
+        options.quiet,
+    )
+
+
 def optim_init(options, param_dict):
     optim.init_study(
         options.train_dir,
@@ -530,6 +568,8 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
 
     if options.command == "train":
         train(options, param_dict)
+    elif options.command == "decode":
+        decode(options, param_dict)
     elif options.command == "optim":
         if options.optim_command == "init":
             optim_init(options, param_dict)

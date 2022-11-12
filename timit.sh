@@ -102,7 +102,7 @@ offset=1
 device=cuda
 feats=( "${ALL_FEATS[@]}" )
 models=( "${ALL_MODELS[@]}" )
-beam_widths=( 1 2 4 8 16 32 )
+beam_widths=( 1 2 4 8 16 32 64 128 )
 only=0
 do_hyperparam=0
 check_jit=1
@@ -252,7 +252,7 @@ fi
 # done
 
 if [ $stage -le 16 ]; then
-  for (( i=OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += $STRIDE )); do
+  for (( i=OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += STRIDE )); do
     model="${models[((i / (${#feats[@]} * seeds) ))]}"
     ii=$((i % (${#feats[@]} * seeds) ))
     feat="${feats[((ii / seeds))]}"
@@ -283,10 +283,118 @@ if [ $stage -le 16 ]; then
   ((only)) && exit 1
 fi
 
+if [ $stage -le 17 ]; then
+  for (( i = OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += STRIDE )); do
+    model="${models[((i / (${#feats[@]} * seeds) ))]}"
+    ii=$((i % (${#feats[@]} * seeds) ))
+    feat="${feats[((ii / seeds))]}"
+    seed="$((ii % seeds))"
+    mconf="conf/model/$model-$feat.ini"
+    mname="$model-$feat"
+    mdir="$exp/$mname/$seed"
+    mpth="$mdir/model.pt"
+    if [ ! -f "$mpth" ]; then
+      echo "Cannot decode $mname with seed $seed: '$mpth' does not exist" \
+        "(did you finish stage 16?)" 1>&2
+      exit 1
+    fi
+    for part in dev test; do
+      hdir="$mdir/hyp/$part"
+      if [ "$part" = dev ]; then
+        ddir="$data/$feat/dev"
+        active_widths=( "${beam_widths[@]}" )
+      else
+        ddir="$data/$feat/test"
+        active_widths=( "$(awk '
+$1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.([^.]*).*$/, "\\1", 1, $3); print a}
+' "$exp/$mname/results.dev.$seed.txt")" )
+      fi
+      for beam_width in "${active_widths[@]}"; do
+        beam_width="$(printf '%02d' $((10#$beam_width + 0)))"
+        bdir="$hdir/$beam_width"
+        mkdir -p "$bdir"
+        if [ ! -f "$bdir/.complete" ]; then
+          echo "Beginning stage 5 - decoding $part using $mname with seed" \
+            "$seed and beam width $beam_width"
+          python asr.py \
+            --device "$device" \
+            --read-ini "$mconf" \
+            decode \
+              "$mpth" "$ddir" "$bdir" \
+              --beam-width "$beam_width"
+          touch "$bdir/.complete"
+          echo "Ending stage 5 - decoding $part using $mname with seed" \
+            "$seed and beam width $beam_width"
+        else
+          echo "'$bdir/.complete' exists. Skipping decoding $part using" \
+            "$mname with seed $seed and beam width $beam_width"
+        fi
+        if [ ! -f "$mdir/$part.hyp.$beam_width.trn" ]; then
+          echo "Beginning stage 5 - gathering hyps for $part using $mname" \
+            "with $seed and beam with $beam_width"
+          torch-token-data-dir-to-trn \
+            "$bdir" "$data/ext/id2token.txt" \
+            "$mdir/$part.hyp.$beam_width.utrn"
+          python prep/timit.py "$data" filter \
+            "$mdir/$part.hyp.$beam_width."{u,}trn
+          echo "Ending stage 5 - gathering hyps for $part using $mname" \
+            "with seed $seed and beam with $beam_width"
+        fi
+      done
+      active_files=( "$mdir/$part.hyp."*.trn )
+      if [ ${#active_files[@]} -ne ${#active_widths[@]} ]; then
+        echo "The number of evaluated beam widths does not equal the number" \
+          "of hypothesis files for partition '$part' in '$mdir'. This could" \
+          "mean you changed the -b parameter after running once or you reran" \
+          "experiments with different parameters and the partition is" \
+          "'test'. Delete all hyp files in '$amdir' and try running this step"\
+          "again" 1>&2
+        exit 1
+      fi
+      [ -f "$exp/$mname/results.$part.$seed.txt" ] || \
+        python prep/error-rates-from-trn.py \
+          "$data/$feat/ext/$part.ref.trn" "$mdir/$part.hyp."*.trn \
+          --suppress-warning > "$exp/$mname/results.$part.$seed.txt"
+    done
+  done
+  ((only)) && exit 1
+fi
+
 if ((only)); then
   echo "Stage $stage does not exist. The -x flag must be paired " \
     "with an existing stage" 1>&2
   exit 1
 fi
 
+# compute descriptives for all the dependencies
+echo "Phone Error Rates:"
+for part in dev test; do
+  for mdir in $(find "$exp" -maxdepth 1 -mindepth 1 -type d | sort ); do
+    results=( $(find "$mdir" -name "results.$part.*.txt" -print) )
+    if [ "${#results[@]}" -gt 0 ]; then
+      echo -n "$part ${mdir##*/}: "
+      awk '
+BEGIN {n=0; s=0; min=1000; max=0}
+$1 ~ /best/ {
+  x=substr($NF, 1, length($NF) - 1) + 0;
+  a[n++]=x; s+=x; if (x < min) min=x; if (x > max) max=x;
+}
+END {
+  mean=s/n; med=a[int(n/2)];
+  var=0; for (i=0;i<n;i++) var+=(a[i] - mean) * (a[i] - mean) / n; std=sqrt(var);
+  printf "n=%d, mean=%.1f%%, std=%.1f%%, med=%.1f%%, min=%.1f%%, max=%.1f%%\n", n, mean, std, med, min, max;
+}' "${results[@]}"
+    fi
+  done
+done
+
 exit 0
+
+# dev lcorr-fbank-81-10ms: n=20, mean=15.5%, std=0.2%, med=15.8%, min=15.2%, max=15.9%
+# dev lcorr-sigbank-41-2ms: n=20, mean=17.5%, std=0.2%, med=17.3%, min=17.1%, max=17.9%
+# dev mcorr-fbank-81-10ms: n=20, mean=17.5%, std=0.2%, med=17.5%, min=17.2%, max=17.8%
+# dev mcorr-sigbank-41-2ms: n=20, mean=17.3%, std=0.3%, med=17.2%, min=16.9%, max=18.0%
+# test lcorr-fbank-81-10ms: n=20, mean=17.8%, std=0.3%, med=17.7%, min=17.2%, max=18.3%
+# test lcorr-sigbank-41-2ms: n=20, mean=19.8%, std=0.4%, med=20.2%, min=18.8%, max=20.6%
+# test mcorr-fbank-81-10ms: n=20, mean=19.7%, std=0.3%, med=19.5%, min=19.2%, max=20.4%
+# test mcorr-sigbank-41-2ms: n=20, mean=19.5%, std=0.5%, med=18.6%, min=18.6%, max=20.2%

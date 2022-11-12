@@ -47,5 +47,8 @@ if ((do_hyperparam)); then
       scripts/slurm/timit_wrapper.sh -s 15
 fi
 
+# sbatch $gpu_opts -c 4 -a 1-80 -W --gres=gpu:1 --mem=25G \
+#   scripts/slurm/timit_wrapper.sh -s 16
+
 sbatch $gpu_opts -c 4 -a 1-80 -W --gres=gpu:1 --mem=25G \
-  scripts/slurm/timit_wrapper.sh -s 16
+  scripts/slurm/timit_wrapper.sh -s 17

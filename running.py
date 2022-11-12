@@ -526,3 +526,54 @@ def train_am(
         )
 
     return model, dev_err
+
+
+@torch.no_grad()
+def decode_am(
+    model_params: models.AcousticModelParams,
+    data_params: data.SpectDataParams,
+    model_pt: Any,
+    decode_dir: str,
+    beam_width: int,
+    hyp_dir: str,
+    device: Union[torch.device, str] = "cpu",
+    quiet: bool = True,
+) -> None:
+
+    device = torch.device(device)
+
+    state_dict = torch.load(model_pt, map_location="cpu")
+    target_dim, freq_dim = state_dict.pop("target_dim"), state_dict.pop("freq_dim")
+    model = models.AcousticModel(freq_dim, target_dim, model_params)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+
+    search = layers.CTCPrefixSearch(beam_width)
+
+    ds = data.SpectDataSet(
+        decode_dir, params=data_params, suppress_alis=True, suppress_uttids=False,
+    )
+    if not quiet:
+        print(
+            f"Decoding '{decode_dir}' with '{model_pt}' and storing in '{hyp_dir}'...",
+            file=sys.stderr,
+        )
+        ds = tqdm(ds)
+
+    os.makedirs(hyp_dir, exist_ok=True)
+
+    for feats, _, utt_id in ds:
+        T = feats.size(0)
+        feats = feats.to(device).unsqueeze(0)
+        lens = torch.tensor([T]).to(device)
+        logits, lens = model(feats, lens)
+        logits = torch.nn.functional.log_softmax(logits, 2)
+        hyp, lens, _ = search(logits, lens.view(1))
+        hyp, lens = hyp[..., 0], lens[..., 0]
+        hyp = hyp.flatten()[: lens.flatten()].cpu()
+        torch.save(hyp, f"{hyp_dir}/{utt_id}.pt")
+
+    if not quiet:
+        print(f"Decoded '{decode_dir}' with '{model_pt}'")
+
