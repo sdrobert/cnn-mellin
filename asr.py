@@ -187,6 +187,15 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         help="Number of hypotheses to consider at once in search",
     )
     decode_parser.add_argument(
+        "--lm-beta",
+        type=float,
+        default=0.0,
+        help="Mixing coefficient of lookup language model",
+    )
+    decode_parser.add_argument(
+        "--lm-pt", default=None, help="Path to lookup language model state dict"
+    )
+    decode_parser.add_argument(
         "--quiet",
         action="store_true",
         default=False,
@@ -419,6 +428,8 @@ def decode(options, param_dict):
         options.hyp_dir,
         options.device,
         options.quiet,
+        options.lm_beta,
+        options.lm_pt,
     )
 
 

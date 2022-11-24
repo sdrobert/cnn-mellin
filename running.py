@@ -538,6 +538,8 @@ def decode_am(
     hyp_dir: str,
     device: Union[torch.device, str] = "cpu",
     quiet: bool = True,
+    lm_beta: float = 0.0,
+    lm_pt: Optional[str] = None,
 ) -> None:
 
     device = torch.device(device)
@@ -549,14 +551,29 @@ def decode_am(
     model.to(device)
     model.eval()
 
-    search = layers.CTCPrefixSearch(beam_width)
+    if lm_beta > 0:
+        if lm_pt is None:
+            raise ValueError("--lm-pt not specified")
+        state_dict = torch.load(lm_pt)
+        sos = state_dict.pop("sos")
+        lm = layers.LookupLanguageModel(model.target_dim - 1, sos)
+        lm.load_state_dict(state_dict)
+        lm.to(device)
+    else:
+        lm = None
+
+    search = layers.CTCPrefixSearch(beam_width, lm_beta, lm)
 
     ds = data.SpectDataSet(
         decode_dir, params=data_params, suppress_alis=True, suppress_uttids=False,
     )
     if not quiet:
+        try:
+            name = model_pt.name
+        except:
+            name = model_pt
         print(
-            f"Decoding '{decode_dir}' with '{model_pt}' and storing in '{hyp_dir}'...",
+            f"Decoding '{decode_dir}' with '{name}' and storing in '{hyp_dir}'...",
             file=sys.stderr,
         )
         ds = tqdm(ds)
@@ -575,5 +592,5 @@ def decode_am(
         torch.save(hyp, f"{hyp_dir}/{utt_id}.pt")
 
     if not quiet:
-        print(f"Decoded '{decode_dir}' with '{model_pt}'")
+        print(f"Decoded '{decode_dir}' with '{name}'")
 

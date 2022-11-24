@@ -18,6 +18,7 @@ dependencies:
   - ninja
   - setuptools_scm
   - pip:
+    - jiwer
     - azureml-core
     - pydrobert-param==0.3.0
     - "git+https://github.com/sdrobert/pydrobert-speech.git@fd0c48d9db0e4ff189f37d6f655dcac6070c70dd"

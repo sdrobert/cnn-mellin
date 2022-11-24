@@ -43,7 +43,10 @@ Options:
   -O PTH          If set, specifies seperate location to store model
                   checkpoints. Otherwise, store with other experiment
                   artifacts (-o).
-  -b 'A [B ...]'  The beam widths to test for decoding
+  -b 'A [B ...]'  The beam widths to test for decoding.
+                  Value: '${beam_widths[*]}'
+  -B 'A [B ...]'  LM mixing coefficients to test for decoding.
+                  Value: '${lm_betas[*]}'
   -n N            Number of repeated trials to perform.
                   Value: '$seeds'
   -k N            Offset (inclusive) of the seed to start from.
@@ -51,6 +54,7 @@ Options:
   -c DEVICE       Device to run experiments on.
                   Value: '$device'
   -f 'A [B ...]'  Feature configurations to experiment with.
+                  Value: '${feats[*]}'
   -m 'A [B ...]'  Model configurations to experiment with.
                   Value: '${models[*]}'
   -q              Perform hyperparameter optimization step (must begin on or
@@ -103,11 +107,12 @@ device=cuda
 feats=( "${ALL_FEATS[@]}" )
 models=( "${ALL_MODELS[@]}" )
 beam_widths=( 1 2 4 8 16 32 64 128 )
+lm_betas=( 0.0 0.5 1 2 5 10 )
 only=0
 do_hyperparam=0
 check_jit=1
 
-while getopts "qxhws:k:i:d:o:O:b:n:c:f:m:" opt; do
+while getopts "qxhws:k:i:d:o:O:b:B:n:c:f:m:" opt; do
   case $opt in
     q)
       do_hyperparam=1
@@ -149,6 +154,10 @@ while getopts "qxhws:k:i:d:o:O:b:n:c:f:m:" opt; do
     b)
       argcheck_all_nat $opt "$OPTARG"
       beam_widths=( $OPTARG )
+      ;;
+    B)
+      argcheck_all_nnfloat $opt "$OPTARG"
+      lm_betas=( $OPTARG )
       ;;
     n)
       argcheck_is_nat $opt "$OPTARG"
@@ -212,6 +221,9 @@ if [ $stage -le 2 ]; then
       python prep/timit.py "$data" torch_dir phn48 "$feat" \
         --computer-json "conf/feats/$feat.json" \
         --seed 0
+      python prep/arpa-lm-to-state-dict.py \
+        "$data/$feat/ext/"{lm.arpa.gz,token2id.txt,lm.pt} \
+        --remove-eos --save-sos
       touch "$data/$feat/.complete"
       echo "Finished stage 2 with feats $feat"
     else
@@ -298,55 +310,65 @@ if [ $stage -le 17 ]; then
         "(did you finish stage 16?)" 1>&2
       exit 1
     fi
-    for part in dev test; do
+    for part in dev test ; do
       hdir="$mdir/hyp/$part"
       if [ "$part" = dev ]; then
         ddir="$data/$feat/dev"
         active_widths=( "${beam_widths[@]}" )
+        active_betas=( "${lm_betas[@]}" )
       else
         ddir="$data/$feat/test"
         active_widths=( "$(awk '
-$1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.([^.]*).*$/, "\\1", 1, $3); print a}
+$1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.([^-]*).*$/, "\\1", 1, $3); print a}
+' "$exp/$mname/results.dev.$seed.txt")" )
+        active_betas=( "$(awk '
+$1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.[^-]*-(.*)[.]trn.*$/, "\\1", 1, $3); print a}
 ' "$exp/$mname/results.dev.$seed.txt")" )
       fi
       for beam_width in "${active_widths[@]}"; do
         beam_width="$(printf '%02d' $((10#$beam_width + 0)))"
-        bdir="$hdir/$beam_width"
-        mkdir -p "$bdir"
-        if [ ! -f "$bdir/.complete" ]; then
-          echo "Beginning stage 5 - decoding $part using $mname with seed" \
-            "$seed and beam width $beam_width"
-          python asr.py \
-            --device "$device" \
-            --read-ini "$mconf" \
-            decode \
-              "$mpth" "$ddir" "$bdir" \
-              --beam-width "$beam_width"
-          touch "$bdir/.complete"
-          echo "Ending stage 5 - decoding $part using $mname with seed" \
-            "$seed and beam width $beam_width"
-        else
-          echo "'$bdir/.complete' exists. Skipping decoding $part using" \
-            "$mname with seed $seed and beam width $beam_width"
-        fi
-        if [ ! -f "$mdir/$part.hyp.$beam_width.trn" ]; then
-          echo "Beginning stage 5 - gathering hyps for $part using $mname" \
-            "with $seed and beam with $beam_width"
-          torch-token-data-dir-to-trn \
-            "$bdir" "$data/ext/id2token.txt" \
-            "$mdir/$part.hyp.$beam_width.utrn"
-          python prep/timit.py "$data" filter \
-            "$mdir/$part.hyp.$beam_width."{u,}trn
-          echo "Ending stage 5 - gathering hyps for $part using $mname" \
-            "with seed $seed and beam with $beam_width"
-        fi
+        for lm_beta in "${active_betas[@]}"; do
+          lm_beta="$(printf '%3.2f' $lm_beta)"
+          bdir="$hdir/$beam_width-$lm_beta"
+          mkdir -p "$bdir"
+          if [ ! -f "$bdir/.complete" ]; then
+            echo "Beginning stage 5 - decoding $part using $mname with seed" \
+              "$seed, beam width $beam_width, and lm_beta $lm_beta"
+            python asr.py \
+              --device "$device" \
+              --read-ini "$mconf" \
+              decode \
+                "$mpth" "$ddir" "$bdir" \
+                --beam-width "$beam_width" \
+                --lm-beta "$lm_beta" \
+                --lm-pt "$data/$feat/ext/lm.pt"
+            touch "$bdir/.complete"
+            echo "Ending stage 5 - decoding $part using $mname with seed" \
+              "$seed, beam width $beam_width, and lm_beta $lm_beta"
+          else
+            echo "'$bdir/.complete' exists. Skipping decoding $part using" \
+              "$mname with seed $seed, beam width $beam_width, and lm_beta" \
+              "$lm_beta"
+          fi
+          if [ ! -f "$mdir/$part.hyp.$beam_width-$lm_beta.trn" ]; then
+            echo "Beginning stage 5 - gathering hyps for $part using $mname" \
+              "with $seed, beam with $beam_width, and lm_beta $lm_beta"
+            torch-token-data-dir-to-trn \
+              "$bdir" "$data/$feat/ext/id2token.txt" \
+              "$mdir/$part.hyp.$beam_width-$lm_beta.utrn"
+            python prep/timit.py "$data" filter \
+              "$mdir/$part.hyp.$beam_width-$lm_beta."{u,}trn
+            echo "Ending stage 5 - gathering hyps for $part using $mname" \
+              "with seed $seed, beam with $beam_width, and lm_beta $lm_beta"
+          fi
+        done
       done
       active_files=( "$mdir/$part.hyp."*.trn )
-      if [ ${#active_files[@]} -ne ${#active_widths[@]} ]; then
-        echo "The number of evaluated beam widths does not equal the number" \
-          "of hypothesis files for partition '$part' in '$mdir'. This could" \
-          "mean you changed the -b parameter after running once or you reran" \
-          "experiments with different parameters and the partition is" \
+      if [ ${#active_files[@]} -ne $((${#active_widths[@]} * ${#active_betas[@]})) ]; then
+        echo "The number of evaluated beam widths/betas does not equal the" \
+          "number of hypothesis files for partition '$part' in '$mdir'. This" \
+          "could mean you changed the -b parameter after running once or you" \
+          "reran experiments with different parameters and the partition is" \
           "'test'. Delete all hyp files in '$amdir' and try running this step"\
           "again" 1>&2
         exit 1
@@ -390,6 +412,12 @@ done
 
 exit 0
 
+### My results
+
+# lm
+
+
+# no lm (beta=0.0)
 # dev lcorr-fbank-81-10ms: n=20, mean=15.5%, std=0.2%, med=15.8%, min=15.2%, max=15.9%
 # dev lcorr-sigbank-41-2ms: n=20, mean=17.5%, std=0.2%, med=17.3%, min=17.1%, max=17.9%
 # dev mcorr-fbank-81-10ms: n=20, mean=17.5%, std=0.2%, med=17.5%, min=17.2%, max=17.8%

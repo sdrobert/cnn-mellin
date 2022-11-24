@@ -15,6 +15,9 @@
 # is the argument a natural number?
 is_nat() [[ "$1" =~ ^[0-9]*[1-9][0-9]*$ ]]
 
+# is the argument a non-negative floating point number?
+is_nnfloat() [[ "$1" =~ ^[0-9][0-9]*[.][0-9]*$ ]]
+
 # is the argument a directory?
 is_dir() [[ -d "$1" ]]
 
@@ -111,6 +114,7 @@ _argcheck_is() {
 }
 
 argcheck_is_nat() { _argcheck_is "is not natural" "$@" is_nat; }
+argcheck_is_nnfloat() { _argcheck_is "is not a non-negative floating point number" "$@" is_float; }
 argcheck_is_dir() { _argcheck_is "is not a directory" "$@" is_dir; }
 argcheck_is_writable() { _argcheck_is "is not writable" "$@" is_writable; }
 argcheck_is_readable() { _argcheck_is "is not readable" "$@" is_readable; }
@@ -134,6 +138,7 @@ _argcheck_all() {
 }
 
 argcheck_all_nat() { _argcheck_all "is not natural" "$@" is_nat; }
+argcheck_all_nnfloat() { _argcheck_all "is not a non-negative floating point number" "$@"  is_float; }
 argcheck_all_dir() { _argcheck_all "is not a directory" "$@" is_dir; }
 argcheck_all_writable() { _argcheck_all "is not writable" "$@" is_writable; }
 argcheck_all_readable() { _argcheck_all "is not readable" "$@" is_readable; }
