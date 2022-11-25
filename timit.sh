@@ -57,7 +57,7 @@ Options:
                   Value: '${feats[*]}'
   -m 'A [B ...]'  Model configurations to experiment with.
                   Value: '${models[*]}'
-  -q              Perform hyperparameter optimization step (must begin on or
+  -H              Perform hyperparameter optimization step (must begin on or
                   before stage 2).
   -x              Run only the current stage.
   -w              Do not raise on failure to compile JIT scripts.
@@ -107,14 +107,18 @@ device=cuda
 feats=( "${ALL_FEATS[@]}" )
 models=( "${ALL_MODELS[@]}" )
 beam_widths=( 1 2 4 8 16 32 64 128 )
-lm_betas=( 0.0 0.5 1 2 5 10 )
+lm_betas=( 0.0 0.2 0.5 1 )
 only=0
 do_hyperparam=0
 check_jit=1
+quiet=0
 
-while getopts "qxhws:k:i:d:o:O:b:B:n:c:f:m:" opt; do
+while getopts "Hqxhws:k:i:d:o:O:b:B:n:c:f:m:" opt; do
   case $opt in
     q)
+      ((quiet+=1)) || true
+      ;;
+    H)
       do_hyperparam=1
       ;;
     x)
@@ -191,10 +195,21 @@ if ((only)) && [ $stage = 0 ]; then
   exit 1
 fi
 
+quiet_flag=
+if [ $quiet -ne 0 ]; then
+  quiet_flag="--quiet"
+fi
+
+qecho () {
+  if ((quiet<2)); then
+    echo "$@"
+  fi
+}
+
 # prep the dataset
 if [ $stage -le 1 ]; then
   if [ ! -f "$data/local/.complete" ]; then
-    echo "Beginning stage 1"
+    qecho "Beginning stage 1"
     if [ -z "$timit" ]; then
       echo "timit directory unset, but needed for this command (use -i)" 1>&2
       exit 1
@@ -204,9 +219,9 @@ if [ $stage -le 1 ]; then
     python prep/timit.py "$data" preamble "$timit"
     python prep/timit.py "$data" init_phn --lm
     touch "$data/local/.complete"
-    echo "Finished stage 1"
+    qecho "Finished stage 1"
   else
-    echo "$data/.complete exists already. Skipping stage 1."
+    qecho "$data/.complete exists already. Skipping stage 1."
   fi
   ((only)) && exit 0
 fi
@@ -217,17 +232,17 @@ if [ $stage -le 2 ]; then
     feat="${feats[$i]}"
     if [ ! -f "$data/$feat/.complete" ]; then
       argcheck_is_rw d "$data"
-      echo "Beginning stage 2 with feats $feat"
+      qecho "Beginning stage 2 with feats $feat"
       python prep/timit.py "$data" torch_dir phn48 "$feat" \
         --computer-json "conf/feats/$feat.json" \
         --seed 0
       python prep/arpa-lm-to-state-dict.py \
         "$data/$feat/ext/"{lm.arpa.gz,token2id.txt,lm.pt} \
-        --remove-eos --save-sos
+        --remove-eos --save-sos --save-vocab-size
       touch "$data/$feat/.complete"
-      echo "Finished stage 2 with feats $feat"
+      qecho "Finished stage 2 with feats $feat"
     else
-      echo \
+      qecho \
         "$data/$feat/.complete already exists." \
         "Skipping stage 2 with feats $feat"
     fi
@@ -244,12 +259,12 @@ if ((do_hyperparam)); then
 elif [ "$stage" -le 15 ]; then
   if ((only)); then
     echo "Stage $stage is a part of hyperparameter selection. If you want " \
-      "to run that, include the flag -q. Otherwise skip to stage 16." 1>&2
+      "to run that, include the flag -H. Otherwise skip to stage 16." 1>&2
     exit 1
   fi
-  echo \
+  qecho \
     "Skipping hyperparameter stages $stage to 16. If you wanted to do" \
-    "these, rerun with the -q flag."
+    "these, rerun with the -H flag."
 fi
 
 # for model in "${models[@]}"; do
@@ -270,116 +285,168 @@ if [ $stage -le 16 ]; then
     feat="${feats[((ii / seeds))]}"
     seed="$((ii % seeds))"
     mconf="conf/model/$model-$feat.ini"
-    model_dir="$exp/$model-$feat/$seed"
-    mkdir -p "$model_dir"
-    if [ ! -f "$model_dir/model.pt" ]; then
-      echo "Beginning training of $model-$feat with seed $seed"
+    mdir="$exp/$model-$feat/$seed"
+    mkdir -p "$mdir"
+    if [ ! -f "$mdir/model.pt" ]; then
+      qecho "Beginning training of $model-$feat with seed $seed"
       for ((n=1; n < max_retries; n++)); do
-        echo "Attempt $n/$max_retries of training"
+        qecho "Attempt $n/$max_retries of training"
         python asr.py ${ckpt_dir+--ckpt-dir "$ckpt_dir/$model-$feat/$seed"} \
-          --device "$device" \
+          --device "$device" $quiet_flag \
           --read-ini "$mconf" \
           train \
             "$data/$feat/train" \
             "$data/$feat/dev" \
-            "$model_dir" \
+            "$mdir" \
             --seed $seed && echo "Run $n/$max_retries succeeded!" && break
-          echo "Run $n/$max_retries failed"
+        echo "Run $n/$max_retries failed" 1>&2
       done
       [ $n -eq $max_retries ] && exit 1
-      echo "Done training of $model-$feat with seed $seed"
+      qecho "Done training of $model-$feat with seed $seed"
     else
-      echo "'$model_dir/model.pt' already exists; skipping training"
+      qecho "'$mdir/model.pt' already exists; skipping training"
     fi
   done
-  ((only)) && exit 1
+  ((only)) && exit 0
 fi
 
 if [ $stage -le 17 ]; then
-  for (( i = OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += STRIDE )); do
-    model="${models[((i / (${#feats[@]} * seeds) ))]}"
-    ii=$((i % (${#feats[@]} * seeds) ))
-    feat="${feats[((ii / seeds))]}"
-    seed="$((ii % seeds))"
+  for (( i = OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds * 2; i += STRIDE )); do
+    model="${models[((i / (${#feats[@]} * seeds * 2) ))]}"
+    ii=$((i % (${#feats[@]} * seeds * 2) ))
+    feat="${feats[((ii / (seeds * 2) ))]}"
+    ii=$((ii % (seeds * 2) ))
+    $((ii / seeds)) && part=test || part=dev
+    seed=$((ii % seeds))
+    ddir="$data/$feat/$part"
     mconf="conf/model/$model-$feat.ini"
     mname="$model-$feat"
     mdir="$exp/$mname/$seed"
     mpth="$mdir/model.pt"
     if [ ! -f "$mpth" ]; then
-      echo "Cannot decode $mname with seed $seed: '$mpth' does not exist" \
-        "(did you finish stage 16?)" 1>&2
+      echo "Cannot compute logits of '$ddir' for $mname with seed" \
+        "$seed: '$mpth' does not exist (did you finish stage 16?)" 1>&2
       exit 1
     fi
+    ldir="$mdir/hyp/$part/logits"
+    mkdir -p "$ldir"
+    if [ ! -f "$ldir/.complete" ]; then
+      qecho "Beginning stage 17 - Computing logits of '$ddir' for $mname with" \
+        "seed $seed..."
+      python asr.py \
+        --device "$device" $quiet_flag \
+        --read-ini "$mconf" \
+        logits "$mpth" "$ddir" "$ldir"
+      touch "$ldir/.complete"
+      qecho "Ending stage 17 - Computed logits of '$ddir' for $mname with" \
+        "seed $seed"
+    else
+      qecho "'$ldir/.complete' already exists, skipping logits computation"
+    fi
+  done
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 18 ]; then
+  for (( i = OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds * 2 * ${#beam_widths[@]} * ${#lm_betas[@]}; i += STRIDE )); do
+    model="${models[((i / (${#feats[@]} * seeds * 2 * ${#beam_widths[@]} * ${#lm_betas[@]}) ))]}"
+    ii=$((i % (${#feats[@]} * seeds * 2 * ${#beam_widths[@]} * ${#lm_betas[@]}) ))
+    feat="${feats[((ii / (seeds * 2 * ${#beam_widths[@]} * ${#lm_betas[@]}) ))]}"
+    ii=$((ii % (seeds * 2 * ${#beam_widths[@]} * ${#lm_betas[@]}) ))
+    ((ii / (seeds * ${#beam_widths[@]} * ${#lm_betas[@]}) )) && part=test || part=dev
+    ii=$((ii % (seeds * ${#beam_widths[@]} * ${#lm_betas[@]}) ))
+    beam_width=$(printf "%02d" "${beam_widths[((ii / (seeds * ${#lm_betas[@]}) ))]}")
+    ii=$((ii % (seeds * ${#lm_betas[@]}) ))
+    lm_beta=$(printf "%3.2f" "${lm_betas[((ii / seeds))]}")
+    seed=$((ii % seeds))
+    mname="$model-$feat"
+    cname="$mname w/ beam width $beam_width, lm_beta $lm_beta, and seed $seed"
+    mdir="$exp/$mname/$seed"
+    hdir="$mdir/hyp/$part"
+    ldir="$hdir/logits"
+    if [ ! -f "$ldir/.complete" ]; then
+      echo "Cannot decode $cname: '$ldir/.complete' does not exist" \
+        "(did you finish stage 17?)" 1>&2
+      exit 1
+    fi
+    bdir="$hdir/$beam_width-$lm_beta"
+    mkdir -p "$bdir"
+    tfile="$mdir/$part.hyp.$beam_width-$lm_beta.trn" 
+    if [ ! -f "$bdir/.complete" ]; then
+      qecho "Stage 18 - Decoding '$data/$feat/$part' with $cname..."
+      python asr.py \
+        --device "$device" $quiet_flag \
+        decode \
+          "$ldir" "$bdir" \
+          --beam-width "$beam_width" \
+          --lm-beta "$lm_beta" \
+          --lm-pt "$data/$feat/ext/lm.pt"
+      rm -f "$tfile" || true  # make sure there isn't a mismatch
+      touch "$bdir/.complete"
+      qecho "Stage 18 - Decoded '$data/$feat/$part' with $cname"
+    else
+      qecho "'$bdir/.complete' exists. Skipping decoding '$data/$feat/$part'" \
+        "with $cname"
+    fi
+    if [ ! -f "$tfile" ]; then
+      qecho "Beginning stage 18 - gathering hyps for '$tfile' with $cname"
+      torch-token-data-dir-to-trn \
+        "$bdir" "$data/$feat/ext/id2token.txt" \
+        "$mdir/$part.hyp.$beam_width-$lm_beta.utrn"
+      python prep/timit.py "$data" filter \
+        "$mdir/$part.hyp.$beam_width-$lm_beta."{u,}trn
+      qecho "Ending stage 18 - gathered hyps for '$tfile' with $cname"
+    else
+      qecho "'$tfile' already exists, skipping gathering hyps"
+    fi
+  done
+  ((only)) && exit 0
+fi
+
+if [ $stage -le 20 ]; then
+  for (( i=OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += STRIDE )); do
+    model="${models[((i / (${#feats[@]} * seeds) ))]}"
+    ii=$((i % (${#feats[@]} * seeds) ))
+    feat="${feats[((ii / seeds))]}"
+    seed="$((ii % seeds))"
+    mdir="$exp/$model-$feat/$seed"
     for part in dev test ; do
-      hdir="$mdir/hyp/$part"
-      if [ "$part" = dev ]; then
-        ddir="$data/$feat/dev"
-        active_widths=( "${beam_widths[@]}" )
-        active_betas=( "${lm_betas[@]}" )
-      else
-        ddir="$data/$feat/test"
-        active_widths=( "$(awk '
+      rfile="$exp/$mname/results.$part.$seed.txt"
+      if [ ! -f "$rfile" ]; then
+        if [ "$part" = dev ]; then
+          active_widths=( "${beam_widths[@]}" )
+          active_betas=( "${lm_betas[@]}" )
+        else
+          active_widths=( "$(awk '
 $1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.([^-]*).*$/, "\\1", 1, $3); print a}
 ' "$exp/$mname/results.dev.$seed.txt")" )
-        active_betas=( "$(awk '
+          active_betas=( "$(awk '
 $1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.[^-]*-(.*)[.]trn.*$/, "\\1", 1, $3); print a}
 ' "$exp/$mname/results.dev.$seed.txt")" )
-      fi
-      for beam_width in "${active_widths[@]}"; do
-        beam_width="$(printf '%02d' $((10#$beam_width + 0)))"
-        for lm_beta in "${active_betas[@]}"; do
-          lm_beta="$(printf '%3.2f' $lm_beta)"
-          bdir="$hdir/$beam_width-$lm_beta"
-          mkdir -p "$bdir"
-          if [ ! -f "$bdir/.complete" ]; then
-            echo "Beginning stage 5 - decoding $part using $mname with seed" \
-              "$seed, beam width $beam_width, and lm_beta $lm_beta"
-            python asr.py \
-              --device "$device" \
-              --read-ini "$mconf" \
-              decode \
-                "$mpth" "$ddir" "$bdir" \
-                --beam-width "$beam_width" \
-                --lm-beta "$lm_beta" \
-                --lm-pt "$data/$feat/ext/lm.pt"
-            touch "$bdir/.complete"
-            echo "Ending stage 5 - decoding $part using $mname with seed" \
-              "$seed, beam width $beam_width, and lm_beta $lm_beta"
-          else
-            echo "'$bdir/.complete' exists. Skipping decoding $part using" \
-              "$mname with seed $seed, beam width $beam_width, and lm_beta" \
-              "$lm_beta"
-          fi
-          if [ ! -f "$mdir/$part.hyp.$beam_width-$lm_beta.trn" ]; then
-            echo "Beginning stage 5 - gathering hyps for $part using $mname" \
-              "with $seed, beam with $beam_width, and lm_beta $lm_beta"
-            torch-token-data-dir-to-trn \
-              "$bdir" "$data/$feat/ext/id2token.txt" \
-              "$mdir/$part.hyp.$beam_width-$lm_beta.utrn"
-            python prep/timit.py "$data" filter \
-              "$mdir/$part.hyp.$beam_width-$lm_beta."{u,}trn
-            echo "Ending stage 5 - gathering hyps for $part using $mname" \
-              "with seed $seed, beam with $beam_width, and lm_beta $lm_beta"
-          fi
+        fi
+        in_files=( )
+        for i in $(seq 1 "${#active_widths[@]}"); do
+          for j in $(seq 1 "${#active_betas[@]}"); do
+            in_files+=( "$mdir/$part.hyp.${active_widths[i]}-${active_betas[j]}.trn" )
+          done
         done
-      done
-      active_files=( "$mdir/$part.hyp."*.trn )
-      if [ ${#active_files[@]} -ne $((${#active_widths[@]} * ${#active_betas[@]})) ]; then
-        echo "The number of evaluated beam widths/betas does not equal the" \
-          "number of hypothesis files for partition '$part' in '$mdir'. This" \
-          "could mean you changed the -b parameter after running once or you" \
-          "reran experiments with different parameters and the partition is" \
-          "'test'. Delete all hyp files in '$amdir' and try running this step"\
-          "again" 1>&2
-        exit 1
-      fi
-      [ -f "$exp/$mname/results.$part.$seed.txt" ] || \
+        if [ "${#in_files[@]}" -eq 0 ]; then
+          echo "Stage 20 - Cannot compute error rates for '$rfile': either" \
+            "active beam widths (${active_widths[*]}) or active lm betas" \
+            "(${active_betas[*]}) is empty" 2>&1
+          exit 1
+        fi
+        qecho "Stage 20 - Computing error rates for '$rfile'..."
         python prep/error-rates-from-trn.py \
-          "$data/$feat/ext/$part.ref.trn" "$mdir/$part.hyp."*.trn \
-          --suppress-warning > "$exp/$mname/results.$part.$seed.txt"
+          "$data/$feat/ext/$part.ref.trn" "${in_files[@]}" \
+          --suppress-warning > "$rfile"
+        qecho "Stage 20 - Computed error rates for '$rfile'"
+      else
+        qecho "'$rfile' exists - skipping computing those error rates"
+      fi
     done
   done
-  ((only)) && exit 1
+  ((only)) && exit 0
 fi
 
 if ((only)); then

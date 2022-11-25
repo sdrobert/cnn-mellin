@@ -132,6 +132,12 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         default="cpu",
         help="Which device to perform operations on",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress output to stderr",
+    )
     pargparse.add_parameterized_print_group(parser, parameterized=param_dict)
     pargparse.add_parameterized_read_group(parser, parameterized=param_dict)
     subparsers = parser.add_subparsers(required=True, dest="command")
@@ -151,12 +157,7 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         type=writable_dir,
         help="Where to save/load models and training history to/from",
     )
-    train_parser.add_argument(
-        "--quiet",
-        action="store_true",
-        default=False,
-        help="Suppress progress output to stderr",
-    )
+
     train_parser.add_argument(
         "--num-data-workers",
         type=int,
@@ -168,17 +169,26 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         "--seed", type=int, default=None, help="If set, overrides the config file seed"
     )
 
+    logit_parser = subparsers.add_parser(
+        "logits",
+        help="Determine utterance logits with an already-trained acoustic model",
+    )
+    logit_parser.add_argument(
+        "model_pt", type=argparse.FileType("rb"), help="Path to model file"
+    )
+    logit_parser.add_argument(
+        "data_dir", type=readable_dir, help="Path to data directory"
+    )
+    logit_parser.add_argument(
+        "logit_dir", type=writable_dir, help="Where to store logits"
+    )
+
     decode_parser = subparsers.add_parser(
         "decode", help="Decode with an already-trained acoustic model"
     )
+    decode_parser.add_argument("logit_dir", type=readable_dir, help="Path to logits")
     decode_parser.add_argument(
-        "model_pt", type=argparse.FileType("rb"), help="Path to model file"
-    )
-    decode_parser.add_argument(
-        "decode_dir", type=readable_dir, help="Path to data to decode"
-    )
-    decode_parser.add_argument(
-        "hyp_dir", type=writable_dir, help="Where to store hypothesis tokens"
+        "decode_dir", type=writable_dir, help="Where to store hypothesis tokens"
     )
     decode_parser.add_argument(
         "--beam-width",
@@ -194,12 +204,6 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
     )
     decode_parser.add_argument(
         "--lm-pt", default=None, help="Path to lookup language model state dict"
-    )
-    decode_parser.add_argument(
-        "--quiet",
-        action="store_true",
-        default=False,
-        help="Suppress progress output to stderr",
     )
 
     if optim is not None:
@@ -418,18 +422,27 @@ def train(options, param_dict):
     torch.save(state_dict, model_pt)
 
 
-def decode(options, param_dict):
-    running.decode_am(
+def logits(options, param_dict):
+    running.compute_logits(
         param_dict["model"],
         param_dict["data"],
         options.model_pt,
-        options.decode_dir,
-        options.beam_width,
-        options.hyp_dir,
+        options.data_dir,
+        options.logit_dir,
         options.device,
         options.quiet,
+    )
+
+
+def decode(options):
+    running.decode_am(
+        options.logit_dir,
+        options.decode_dir,
+        options.device,
+        options.beam_width,
         options.lm_beta,
         options.lm_pt,
+        options.quiet,
     )
 
 
@@ -579,8 +592,10 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
 
     if options.command == "train":
         train(options, param_dict)
+    elif options.command == "logits":
+        logits(options, param_dict)
     elif options.command == "decode":
-        decode(options, param_dict)
+        decode(options)
     elif options.command == "optim":
         if options.optim_command == "init":
             optim_init(options, param_dict)
@@ -590,6 +605,8 @@ def cnn_mellin(args: Optional[Sequence[str]] = None):
             optim_best(options)
         elif options.optim_command == "important":
             optim_important(options)
+    else:
+        raise NotImplementedError
 
 
 if __name__ == "__main__":

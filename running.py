@@ -529,17 +529,14 @@ def train_am(
 
 
 @torch.no_grad()
-def decode_am(
+def compute_logits(
     model_params: models.AcousticModelParams,
     data_params: data.SpectDataParams,
     model_pt: Any,
-    decode_dir: str,
-    beam_width: int,
-    hyp_dir: str,
+    data_dir: str,
+    logit_dir: str,
     device: Union[torch.device, str] = "cpu",
     quiet: bool = True,
-    lm_beta: float = 0.0,
-    lm_pt: Optional[str] = None,
 ) -> None:
 
     device = torch.device(device)
@@ -551,21 +548,8 @@ def decode_am(
     model.to(device)
     model.eval()
 
-    if lm_beta > 0:
-        if lm_pt is None:
-            raise ValueError("--lm-pt not specified")
-        state_dict = torch.load(lm_pt)
-        sos = state_dict.pop("sos")
-        lm = layers.LookupLanguageModel(model.target_dim - 1, sos)
-        lm.load_state_dict(state_dict)
-        lm.to(device)
-    else:
-        lm = None
-
-    search = layers.CTCPrefixSearch(beam_width, lm_beta, lm)
-
     ds = data.SpectDataSet(
-        decode_dir, params=data_params, suppress_alis=True, suppress_uttids=False,
+        data_dir, params=data_params, suppress_alis=True, suppress_uttids=False,
     )
     if not quiet:
         try:
@@ -573,24 +557,100 @@ def decode_am(
         except:
             name = model_pt
         print(
-            f"Decoding '{decode_dir}' with '{name}' and storing in '{hyp_dir}'...",
+            f"Computing logits for '{data_dir}' with '{name}' and storing in "
+            f"'{logit_dir}'...",
             file=sys.stderr,
         )
         ds = tqdm(ds)
 
-    os.makedirs(hyp_dir, exist_ok=True)
+    os.makedirs(logit_dir, exist_ok=True)
 
     for feats, _, utt_id in ds:
         T = feats.size(0)
         feats = feats.to(device).unsqueeze(0)
         lens = torch.tensor([T]).to(device)
         logits, lens = model(feats, lens)
-        logits = torch.nn.functional.log_softmax(logits, 2)
-        hyp, lens, _ = search(logits, lens.view(1))
-        hyp, lens = hyp[..., 0], lens[..., 0]
-        hyp = hyp.flatten()[: lens.flatten()].cpu()
-        torch.save(hyp, f"{hyp_dir}/{utt_id}.pt")
+        torch.save(logits.cpu(), f"{logit_dir}/{utt_id}.pt")
+        del logits, lens, feats
 
     if not quiet:
-        print(f"Decoded '{decode_dir}' with '{name}'")
+        print(
+            f"Computed logits for '{data_dir}' with '{name}' and stored in "
+            f"'{logit_dir}'",
+            file=sys.stderr,
+        )
+
+
+class DirectoryDataset(torch.utils.data.Dataset):
+
+    data_dir: str
+    suffix: str
+    utt_ids: Sequence[str]
+
+    def __init__(self, data_dir: str, suffix: str = ".pt") -> None:
+        super().__init__()
+        if not os.path.isdir(data_dir):
+            raise ValueError(f"'{data_dir}' is not a directory")
+        self.data_dir, self.suffix = data_dir, suffix
+        self.utt_ids = sorted(
+            x[: len(x) - len(suffix)]
+            for x in os.listdir(data_dir)
+            if x.endswith(suffix)
+        )
+
+    def __len__(self) -> int:
+        return len(self.utt_ids)
+
+    def __getitem__(self, idx: int) -> Tuple[str, torch.Tensor]:
+        utt_id = self.utt_ids[idx]
+        return utt_id, torch.load(os.path.join(self.data_dir, utt_id + self.suffix))
+
+
+@torch.no_grad()
+def decode_am(
+    logit_dir: str,
+    decode_dir: str,
+    device: Union[torch.device, str] = "cpu",
+    beam_width: int = 1,
+    lm_beta: float = 0.0,
+    lm_pt: Optional[str] = None,
+    quiet: bool = True,
+) -> None:
+
+    device = torch.device(device)
+
+    if lm_beta > 0:
+        if lm_pt is None:
+            raise ValueError("--lm-pt not specified")
+        state_dict = torch.load(lm_pt)
+        vocab_size = state_dict.pop("vocab_size")
+        sos = state_dict.pop("sos")
+        lm = layers.LookupLanguageModel(vocab_size, sos)
+        lm.load_state_dict(state_dict)
+        lm.to(device)
+    else:
+        lm = None
+
+    search = layers.CTCPrefixSearch(beam_width, lm_beta, lm)
+
+    ds = DirectoryDataset(logit_dir)
+    if not quiet:
+        print(
+            f"Decoding from '{logit_dir}' with beam width {beam_width} and lm beta"
+            f"{lm_beta} and storing in '{decode_dir}'...",
+            file=sys.stderr,
+        )
+        ds = tqdm(ds)
+
+    os.makedirs(decode_dir, exist_ok=True)
+
+    for utt_id, logits in ds:
+        logits = logits.to(device).log_softmax(-1)
+        hyp, lens, _ = search(logits)
+        hyp, lens = hyp[..., 0], lens[..., 0]
+        hyp = hyp.flatten()[: lens.flatten()].cpu()
+        torch.save(hyp, f"{decode_dir}/{utt_id}.pt")
+
+    if not quiet:
+        print(f"Decoded into '{decode_dir}'", file=sys.stderr)
 
