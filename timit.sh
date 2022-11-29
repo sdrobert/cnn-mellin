@@ -190,6 +190,9 @@ if ((check_jit)); then
   python -c 'import warnings; warnings.simplefilter("error"); import mconv'
 fi
 
+beam_widths=( $(printf "%02d " "${beam_widths[@]}") )
+lm_betas=( $(printf "%3.2f " "${lm_betas[@]}") )
+
 if ((only)) && [ $stage = 0 ]; then
   echo "The -x flag must be paired with the -s flag" 1>&2
   exit 1
@@ -355,9 +358,9 @@ if [ $stage -le 18 ]; then
     ii=$((ii % (seeds * 2 * ${#beam_widths[@]} * ${#lm_betas[@]}) ))
     ((ii / (seeds * ${#beam_widths[@]} * ${#lm_betas[@]}) )) && part=test || part=dev
     ii=$((ii % (seeds * ${#beam_widths[@]} * ${#lm_betas[@]}) ))
-    beam_width=$(printf "%02d" "${beam_widths[((ii / (seeds * ${#lm_betas[@]}) ))]}")
+    beam_width="${beam_widths[((ii / (seeds * ${#lm_betas[@]}) ))]}"
     ii=$((ii % (seeds * ${#lm_betas[@]}) ))
-    lm_beta=$(printf "%3.2f" "${lm_betas[((ii / seeds))]}")
+    lm_beta="${lm_betas[((ii / seeds))]}"
     seed=$((ii % seeds))
     mname="$model-$feat"
     cname="$mname w/ beam width $beam_width, lm_beta $lm_beta, and seed $seed"
@@ -403,14 +406,15 @@ if [ $stage -le 18 ]; then
   ((only)) && exit 0
 fi
 
-if [ $stage -le 20 ]; then
+if [ $stage -le 19 ]; then
   for (( i=OFFSET; i < ${#models[@]} * ${#feats[@]} * seeds; i += STRIDE )); do
     model="${models[((i / (${#feats[@]} * seeds) ))]}"
     ii=$((i % (${#feats[@]} * seeds) ))
     feat="${feats[((ii / seeds))]}"
     seed="$((ii % seeds))"
-    mdir="$exp/$model-$feat/$seed"
-    for part in dev test ; do
+    mname="$model-$feat"
+    mdir="$exp/$mname/$seed"
+    for part in 'dev' 'test' ; do
       rfile="$exp/$mname/results.$part.$seed.txt"
       if [ ! -f "$rfile" ]; then
         if [ "$part" = dev ]; then
@@ -425,9 +429,9 @@ $1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.[^-]*-(.*)[.]trn.*$/, "\\1", 1, $3); print
 ' "$exp/$mname/results.dev.$seed.txt")" )
         fi
         in_files=( )
-        for i in $(seq 1 "${#active_widths[@]}"); do
-          for j in $(seq 1 "${#active_betas[@]}"); do
-            in_files+=( "$mdir/$part.hyp.${active_widths[i]}-${active_betas[j]}.trn" )
+        for j in "${!active_widths[@]}"; do
+          for k in "${!active_betas[@]}"; do
+            in_files+=( "$mdir/$part.hyp.${active_widths[j]}-${active_betas[k]}.trn" )
           done
         done
         if [ "${#in_files[@]}" -eq 0 ]; then
@@ -437,9 +441,14 @@ $1 ~ /^best/ {a=gensub(/.*\/dev\.hyp\.[^-]*-(.*)[.]trn.*$/, "\\1", 1, $3); print
           exit 1
         fi
         qecho "Stage 20 - Computing error rates for '$rfile'..."
+        v=0
         python prep/error-rates-from-trn.py \
           "$data/$feat/ext/$part.ref.trn" "${in_files[@]}" \
-          --suppress-warning > "$rfile"
+          --suppress-warning > "$rfile" || v=1
+        if ((v)); then
+          rm "$rfile"
+          exit 1
+        fi
         qecho "Stage 20 - Computed error rates for '$rfile'"
       else
         qecho "'$rfile' exists - skipping computing those error rates"

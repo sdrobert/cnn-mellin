@@ -197,6 +197,12 @@ def parse_args(args: Optional[Sequence[str]], param_dict: dict):
         help="Number of hypotheses to consider at once in search",
     )
     decode_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Number of utterances' logits to decode at once",
+    )
+    decode_parser.add_argument(
         "--lm-beta",
         type=float,
         default=0.0,
@@ -439,6 +445,7 @@ def decode(options):
         options.logit_dir,
         options.decode_dir,
         options.device,
+        options.batch_size,
         options.beam_width,
         options.lm_beta,
         options.lm_pt,

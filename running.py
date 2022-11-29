@@ -606,11 +606,23 @@ class DirectoryDataset(torch.utils.data.Dataset):
         return utt_id, torch.load(os.path.join(self.data_dir, utt_id + self.suffix))
 
 
+def collate_logits(
+    elems: Sequence[Tuple[str, torch.Tensor]]
+) -> Tuple[Sequence[str], torch.Tensor, torch.Tensor]:
+    utt_ids, logits = zip(*elems)
+    utt_ids = tuple(utt_ids)
+    logits = [x.flatten(1) for x in logits]
+    lens = torch.tensor([x.size(0) for x in logits])
+    logits = torch.nn.utils.rnn.pad_sequence(logits)
+    return utt_ids, logits, lens
+
+
 @torch.no_grad()
 def decode_am(
     logit_dir: str,
     decode_dir: str,
     device: Union[torch.device, str] = "cpu",
+    batch_size: int = 1,
     beam_width: int = 1,
     lm_beta: float = 0.0,
     lm_pt: Optional[str] = None,
@@ -633,23 +645,27 @@ def decode_am(
 
     search = layers.CTCPrefixSearch(beam_width, lm_beta, lm)
 
-    ds = DirectoryDataset(logit_dir)
+    dl = torch.utils.data.DataLoader(
+        DirectoryDataset(logit_dir), batch_size, collate_fn=collate_logits
+    )
+
     if not quiet:
         print(
             f"Decoding from '{logit_dir}' with beam width {beam_width} and lm beta"
             f"{lm_beta} and storing in '{decode_dir}'...",
             file=sys.stderr,
         )
-        ds = tqdm(ds)
+        dl = tqdm(dl)
 
     os.makedirs(decode_dir, exist_ok=True)
 
-    for utt_id, logits in ds:
+    for utt_ids, logits, lens in dl:
         logits = logits.to(device).log_softmax(-1)
-        hyp, lens, _ = search(logits)
-        hyp, lens = hyp[..., 0], lens[..., 0]
-        hyp = hyp.flatten()[: lens.flatten()].cpu()
-        torch.save(hyp, f"{decode_dir}/{utt_id}.pt")
+        lens = lens.to(device)
+        hyps, lens, _ = search(logits, lens)
+        hyps, lens = hyps[..., 0].cpu(), lens[..., 0].cpu()
+        for utt_id, hyp, len_ in zip(utt_ids, hyps.T, lens):
+            torch.save(hyp[:len_], f"{decode_dir}/{utt_id}.pt")
 
     if not quiet:
         print(f"Decoded into '{decode_dir}'", file=sys.stderr)
