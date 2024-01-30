@@ -18,9 +18,9 @@ dependencies:
   - ninja
   - setuptools_scm
   - sqlalchemy<2.0
+  - jiwer
   - pip:
-    - jiwer
     - azureml-core
     - pydrobert-param==0.4.1
     - "git+https://github.com/sdrobert/pydrobert-speech.git@fd0c48d9db0e4ff189f37d6f655dcac6070c70dd"
-    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@86472ab542c50468bb30730b603ae10f7de0cca3"
+    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@588b8a0c2045b813fc2a546298dd66769bd8ff14"
