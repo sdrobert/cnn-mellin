@@ -48,7 +48,7 @@ def test_train_command(temp_dir, device, populate_torch_dir):
     model_1_path = os.path.join(model_1_dir, "model.pt")
     assert os.path.isfile(model_1_path)
     model_2_dir = os.path.join(temp_dir, "models_2")
-    args[6] = model_2_dir
+    args[7] = model_2_dir
     assert not command_line.cnn_mellin(args)
     model_2_hist_dir = os.path.join(model_2_dir, "training")
     assert os.path.isdir(model_2_hist_dir)
