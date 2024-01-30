@@ -34,12 +34,12 @@ def test_train_command(temp_dir, device, populate_torch_dir):
         ini_file,
         "--device",
         str(device),
+        "--quiet",
         "train",
         train_dir,
         model_1_dir,
         "--num-data-workers",
         "0",
-        "--quiet",
     ]
     assert not command_line.cnn_mellin(args)
     model_1_hist_dir = os.path.join(model_1_dir, "training")

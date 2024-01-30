@@ -218,8 +218,8 @@ def _1d_buffers(idx, entries, nh_func):
     u = int(entries["kU"][idx])
     nh = nh_func(nf, ng, s, d, p, u)
     f = torch.empty((1, c_in, nf)) if f is None else f.expand(c_out, c_in, nf)
-    g = g.reshape(c_in, ng)
-    h = h.reshape((c_in, nf, nh) if c_out is None else (c_out, nh))
+    g = g.reshape(1, c_in, ng)
+    h = h.reshape((1, c_in, nf, nh) if c_out is None else (1, c_out, nh))
     return f, g, h, s, d, p, u
 
 
@@ -246,13 +246,13 @@ def _2d_buffers(idx, entries, nhx_func, nhy_func):
     f = (
         torch.empty((1, c_in, nfx, nfy))
         if f is None
-        else f.expand(c_out, c_in, nfx, nfy)
+        else f.reshape(c_out, c_in, nfx, nfy)
     )
-    g = g.reshape(c_in, ngx, ngy)
+    g = g.reshape(1, c_in, ngx, ngy)
     if c_out is None:
-        h = h.reshape(c_in, nfx, nfy, nhx, nhy)
+        h = h.reshape(1, c_in, nfx, nfy, nhx, nhy)
     else:
-        h = h.reshape(c_out, nhx, nhy)
+        h = h.reshape(1, c_out, nhx, nhy)
     return f, g, h, (sx, sy), (dx, dy), (px, py), (ux, uy)
 
 
